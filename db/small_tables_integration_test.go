@@ -277,7 +277,9 @@ ANALYZE nodes, node_iatas, node_neighbors, observers;`
 func TestNodeReadersAfterIndexDropsPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)
-	applyMigrationsTx(t, ctx, tx, "003_meshmapper_repeaters.sql") // GetNode reads the MeshMapper tables
+	applyMigrationsTx(t, ctx, tx, "003_meshmapper_repeaters.sql")   // GetNode reads the MeshMapper tables
+	applyMigrationsTx(t, ctx, tx, "077_nodes_prev_clock_drift.sql") // and every column of the node row
+	applyMigrationsTx(t, ctx, tx, "064_polling.sql")                // and the polling claims behind isPoller
 	mustExec(t, ctx, tx, smallTableReaderFixture)
 	store := &Store{q: sqlc.New(tx)}
 
@@ -307,7 +309,7 @@ func TestNodeReadersAfterIndexDropsPostgres(t *testing.T) {
 			ms = cursor.UnixMilli()
 		}
 		return readerShape{name: name, norm: normNodes, run: func() (any, error) {
-			return store.ListNodes(ctx, nodeType, iatas, mbPaths, mbTraces, nil, prefix, nameFilter, "", ms, nil, limit, neighbors)
+			return store.ListNodes(ctx, nodeType, iatas, mbPaths, mbTraces, nil, nil, prefix, nameFilter, "", ms, nil, limit, neighbors)
 		}}
 	}
 	var none time.Time

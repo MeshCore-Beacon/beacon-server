@@ -32,11 +32,12 @@ func ContinentFor(iata string) string {
 	return DB[iata].Continent
 }
 
-// BuildAllowedSet returns a set of IATA codes permitted by the given country
-// and continent allowlists. If both slices are empty, returns nil (no filter).
-// An IATA passes if it matches any entry in either list (OR semantics).
-func BuildAllowedSet(allowCountries, allowContinents []string) map[string]struct{} {
-	if len(allowCountries) == 0 && len(allowContinents) == 0 {
+// BuildAllowedSet returns a set of IATA codes permitted by the given country,
+// continent and single-code allowlists. If all are empty, returns nil (no filter).
+// An IATA passes if it matches any entry in any list (OR semantics). A listed
+// code is allowed even when the dataset does not know it.
+func BuildAllowedSet(allowCountries, allowContinents, allowIATAs []string) map[string]struct{} {
+	if len(allowCountries) == 0 && len(allowContinents) == 0 && len(allowIATAs) == 0 {
 		return nil
 	}
 	countrySet := make(map[string]struct{}, len(allowCountries))
@@ -48,6 +49,9 @@ func BuildAllowedSet(allowCountries, allowContinents []string) map[string]struct
 		continentSet[c] = struct{}{}
 	}
 	allowed := make(map[string]struct{})
+	for _, iata := range allowIATAs {
+		allowed[iata] = struct{}{}
+	}
 	for iata, entry := range DB {
 		if _, ok := countrySet[entry.Country]; ok {
 			allowed[iata] = struct{}{}

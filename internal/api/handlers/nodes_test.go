@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -132,7 +133,7 @@ func TestListNodes_OK(t *testing.T) {
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	r := chi.NewRouter()
 	r.Get("/nodes", listNodes(stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
 			return api.NodePage{Page: api.Page[api.NodeSummary]{Items: []api.NodeSummary{{ID: nodeID}}}}, nil
 		},
 	}))
@@ -150,7 +151,7 @@ func TestListNodes_NeighborsParam_PassedThrough(t *testing.T) {
 	var gotIncludeNeighbors bool
 	r := chi.NewRouter()
 	r.Get("/nodes", listNodes(stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, includeNeighbors bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, includeNeighbors bool) (api.NodePage, error) {
 			gotIncludeNeighbors = includeNeighbors
 			return api.NodePage{Page: api.Page[api.NodeSummary]{Items: []api.NodeSummary{{ID: nodeID, NeighborIDs: []uuid.UUID{neighborID}}}}}, nil
 		},
@@ -184,7 +185,7 @@ func TestListNodes_NeighborsParam_BareFlagMeansTrue(t *testing.T) {
 	var gotIncludeNeighbors bool
 	r := chi.NewRouter()
 	r.Get("/nodes", listNodes(stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, includeNeighbors bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, includeNeighbors bool) (api.NodePage, error) {
 			gotIncludeNeighbors = includeNeighbors
 			return api.NodePage{}, nil
 		},
@@ -204,7 +205,7 @@ func TestListNodes_PubkeyPrefixParam_PassedThrough(t *testing.T) {
 	var gotPubkeyPrefix string
 	r := chi.NewRouter()
 	r.Get("/nodes", listNodes(stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, pubkeyPrefix, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, pubkeyPrefix, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
 			gotPubkeyPrefix = pubkeyPrefix
 			return api.NodePage{}, nil
 		},
@@ -341,7 +342,7 @@ func TestNodesCursorPrecedence(t *testing.T) {
 	var gotPage *api.NodeCursor
 	next := "v1:1:0b7e2c4a-5f1d-4c3e-9a2b-8d6f1e0c3a57"
 	reader := stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, cursor int64, pageCursor *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, cursor int64, pageCursor *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
 			called, gotCursor, gotPage = true, cursor, pageCursor
 			return api.NodePage{Page: api.Page[api.NodeSummary]{Items: []api.NodeSummary{}}, NextPageCursor: &next}, nil
 		},
@@ -382,11 +383,11 @@ func TestListNodes_Sort(t *testing.T) {
 	var gotCursor *api.NodeSortCursor
 	var defaultCalls int
 	reader := stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
 			defaultCalls++
 			return api.NodePage{}, nil
 		},
-		listNodesSorted: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, sort api.NodeSort, cursor *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
+		listNodesSorted: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, sort api.NodeSort, cursor *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
 			gotSort, gotCursor = sort, cursor
 			return api.NodePage{}, nil
 		},
@@ -561,5 +562,280 @@ func TestGetNodeActivity_Shape(t *testing.T) {
 	}
 	if len(windows) != 2 || windows[0] != 168*time.Hour || windows[1] != 24*time.Hour {
 		t.Errorf("windows %v, want 168h then the 24h default", windows)
+	}
+}
+
+func nodeTelemetryGet(t *testing.T, sr stubReader, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	r := chi.NewRouter()
+	r.Get("/nodes/{nodeId}/telemetry", getNodeTelemetry(sr))
+	req := httptest.NewRequest(http.MethodGet, "/nodes/"+uuid.NewString()+"/telemetry"+query, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestGetNodeTelemetry_Defaults(t *testing.T) {
+	var since time.Time
+	sr := stubReader{getNodeReadings: func(_ context.Context, _ uuid.UUID, s, _ time.Time, inc bool) ([]api.NodeReading, bool, int, error) {
+		since = s
+		if inc {
+			t.Error("includeUntrusted set without include=untrusted")
+		}
+		return []api.NodeReading{{SampledAt: time.Now().Add(-time.Hour), Trusted: true, BatteryMV: ptrOf(int32(4100))}}, true, 3, nil
+	}}
+	w := nodeTelemetryGet(t, sr, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body)
+	}
+	var got api.NodeTelemetry
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Range != "168h" || got.Interval != "6h" || !got.Polled || got.UntrustedReadings != 3 || len(got.Points) != 1 {
+		t.Errorf("got %+v", got)
+	}
+	if d := time.Since(since); d < 168*time.Hour || d > 168*time.Hour+time.Minute {
+		t.Errorf("since is %v ago, want 168h", d)
+	}
+}
+
+func TestGetNodeTelemetry_CounterSpanInJSON(t *testing.T) {
+	status := func(ago time.Duration, secs int64) api.NodeReading {
+		return api.NodeReading{SampledAt: time.Now().Add(-ago), Method: "status", Trusted: true, UptimeSeconds: ptrOf(1_000_000 + secs),
+			AirtimeTxSecs: ptrOf(secs / 20), AirtimeRxSecs: ptrOf(secs / 10), PacketsReceived: ptrOf(secs / 100),
+			PacketsSent: ptrOf(secs / 360), ReceiveErrors: ptrOf(secs / 3600)}
+	}
+	serve := func(rs ...api.NodeReading) string {
+		return nodeTelemetryGet(t, stubReader{getNodeReadings: func(context.Context, uuid.UUID, time.Time, time.Time, bool) ([]api.NodeReading, bool, int, error) {
+			return rs, true, 0, nil
+		}}, "?range=24h&interval=24h").Body.String()
+	}
+	// Both polls land in the same 24h bucket only if today has room, so read the span rather than count points.
+	if body := serve(status(7*time.Hour, 0), status(time.Hour, 21600)); !strings.Contains(body, `"counterSpanSecs":21600`) {
+		t.Errorf("status bucket: %s, want counterSpanSecs 21600", body)
+	}
+	body := serve(api.NodeReading{SampledAt: time.Now().Add(-time.Hour), Trusted: true, BatteryMV: ptrOf(int32(4100))})
+	if strings.Contains(body, "counterSpanSecs") || strings.Contains(body, "airtimeRxSecs") {
+		t.Errorf("telemetry-only bucket: %s, want no span or counters", body)
+	}
+}
+
+func TestGetNodeTelemetry_AllowedParams(t *testing.T) {
+	for _, rng := range []string{"24h", "72h", "168h", "720h"} {
+		for _, iv := range []string{"1h", "6h", "24h"} {
+			w := nodeTelemetryGet(t, stubReader{}, "?range="+rng+"&interval="+iv)
+			var got api.NodeTelemetry
+			if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Range != rng || got.Interval != iv {
+				t.Errorf("%s/%s: %d %s", rng, iv, w.Code, w.Body)
+			}
+		}
+	}
+}
+
+func TestGetNodeTelemetry_DefaultInterval(t *testing.T) {
+	for rng, want := range map[string]string{"24h": "1h", "72h": "1h", "168h": "6h", "720h": "24h"} {
+		var got api.NodeTelemetry
+		w := nodeTelemetryGet(t, stubReader{}, "?range="+rng)
+		if json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Interval != want {
+			t.Errorf("range %s: interval %q, want %s", rng, got.Interval, want)
+		}
+	}
+}
+
+func TestGetNodeTelemetry_IncludeUntrusted(t *testing.T) {
+	var inc bool
+	sr := stubReader{getNodeReadings: func(_ context.Context, _ uuid.UUID, _, _ time.Time, i bool) ([]api.NodeReading, bool, int, error) {
+		inc = i
+		return nil, true, 0, nil
+	}}
+	if w := nodeTelemetryGet(t, sr, "?include=untrusted"); w.Code != http.StatusOK || !inc {
+		t.Errorf("status %d, includeUntrusted %v", w.Code, inc)
+	}
+	if w := nodeTelemetryGet(t, sr, "?include=everything"); w.Code != http.StatusBadRequest {
+		t.Errorf("bad include: status %d", w.Code)
+	}
+}
+
+func TestGetNodeTelemetry_BadParams(t *testing.T) {
+	for _, q := range []string{"?range=48h", "?range=71h", "?range=abc", "?interval=2h", "?interval=1d", "?range=24h&interval=7h"} {
+		if w := nodeTelemetryGet(t, stubReader{}, q); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400", q, w.Code)
+		}
+	}
+	r := chi.NewRouter()
+	r.Get("/nodes/{nodeId}/telemetry", getNodeTelemetry(stubReader{}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nodes/nope/telemetry", nil))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("bad id: status %d", w.Code)
+	}
+}
+
+func TestGetNodeTelemetry_UnknownNode(t *testing.T) {
+	sr := stubReader{getNodeReadings: func(context.Context, uuid.UUID, time.Time, time.Time, bool) ([]api.NodeReading, bool, int, error) {
+		return nil, false, 0, pgx.ErrNoRows
+	}}
+	if w := nodeTelemetryGet(t, sr, ""); w.Code != http.StatusNotFound {
+		t.Errorf("status %d, want 404", w.Code)
+	}
+}
+
+func TestGetNodeTelemetry_NeverPolled(t *testing.T) {
+	w := nodeTelemetryGet(t, stubReader{}, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d", w.Code)
+	}
+	for _, want := range []string{`"polled":false`, `"points":[]`, `"untrustedReadings":0`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("missing %s in %s", want, w.Body)
+		}
+	}
+}
+
+func TestGetNodeTelemetry_StoreError(t *testing.T) {
+	sr := stubReader{getNodeReadings: func(context.Context, uuid.UUID, time.Time, time.Time, bool) ([]api.NodeReading, bool, int, error) {
+		return nil, false, 0, errors.New("boom")
+	}}
+	if w := nodeTelemetryGet(t, sr, ""); w.Code != http.StatusInternalServerError {
+		t.Errorf("status %d, want 500", w.Code)
+	}
+}
+
+func ptrOf[T any](v T) *T { return &v }
+
+func latestGet(t *testing.T, sr stubReader, polling bool, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	m := chi.NewRouter()
+	m.Mount("/nodes", NodesRouter(sr, polling))
+	w := httptest.NewRecorder()
+	m.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+	return w
+}
+
+func TestListLatestNodeReadings_Shape(t *testing.T) {
+	id := uuid.New()
+	bat, temp := int32(4080), float32(1.5)
+	var gotSince time.Time
+	var gotIATAs []string
+	sr := stubReader{listLatestNodeReadings: func(_ context.Context, iatas []string, since time.Time) ([]api.NodeLatestReading, error) {
+		gotSince, gotIATAs = since, iatas
+		return []api.NodeLatestReading{{NodeID: id, SampledAt: 1794702630000, BatteryMV: &bat, TemperatureC: &temp}}, nil
+	}}
+	before := time.Now()
+	w := latestGet(t, sr, true, "/nodes/telemetry/latest?iatas=yvr,YYJ")
+	if w.Code != http.StatusOK {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	var got struct {
+		GeneratedAt int64 `json:"generatedAt"`
+		Items       []json.RawMessage
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || len(got.Items) != 1 {
+		t.Fatal(err, w.Body)
+	}
+	if d := time.UnixMilli(got.GeneratedAt).Sub(before); d < -time.Second || d > time.Second {
+		t.Errorf("generatedAt off by %v", d)
+	}
+	want := `{"nodeId":"` + id.String() + `","sampledAt":1794702630000,"batteryMv":4080,"temperatureC":1.5}`
+	if string(got.Items[0]) != want {
+		t.Errorf("item %s\nwant %s", got.Items[0], want)
+	}
+	if d := gotSince.Sub(before.Add(-168 * time.Hour)); d < -time.Second || d > time.Second {
+		t.Errorf("since %v is not about 168h ago", gotSince)
+	}
+	if len(gotIATAs) != 2 || gotIATAs[0] != "YVR" || gotIATAs[1] != "YYJ" {
+		t.Errorf("iatas %v", gotIATAs)
+	}
+}
+
+func TestListLatestNodeReadings_EmptyIsArray(t *testing.T) {
+	w := latestGet(t, stubReader{}, true, "/nodes/telemetry/latest")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"items":[]`) {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+}
+
+func TestListLatestNodeReadings_PollingOff(t *testing.T) {
+	called := false
+	sr := stubReader{listLatestNodeReadings: func(context.Context, []string, time.Time) ([]api.NodeLatestReading, error) {
+		called = true
+		return nil, nil
+	}}
+	w := latestGet(t, sr, false, "/nodes/telemetry/latest")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"items":[]`) || called {
+		t.Fatalf("%d %s called=%v", w.Code, w.Body, called)
+	}
+}
+
+func TestListLatestNodeReadings_ReaderError(t *testing.T) {
+	sr := stubReader{listLatestNodeReadings: func(context.Context, []string, time.Time) ([]api.NodeLatestReading, error) {
+		return nil, errors.New("boom")
+	}}
+	if w := latestGet(t, sr, true, "/nodes/telemetry/latest"); w.Code != http.StatusInternalServerError {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+}
+
+func TestNodesRouter_TelemetryPathsUnchanged(t *testing.T) {
+	// The bare path still goes to /{nodeId}, which rejects a non-uuid id as before.
+	if w := latestGet(t, stubReader{}, true, "/nodes/telemetry"); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid node ID") {
+		t.Errorf("bare telemetry: %d %s", w.Code, w.Body)
+	}
+	if w := latestGet(t, stubReader{}, true, "/nodes/"+uuid.NewString()+"/telemetry"); w.Code != http.StatusOK {
+		t.Errorf("node telemetry: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestListNodes_PollerParam(t *testing.T) {
+	yes, no := true, false
+	for _, tc := range []struct {
+		query string
+		want  *bool
+	}{
+		{"", nil},
+		{"?poller=true", &yes},
+		{"?poller=false", &no},
+	} {
+		for _, sorted := range []bool{false, true} {
+			var got *bool
+			called := false
+			r := chi.NewRouter()
+			r.Get("/nodes", listNodes(stubReader{
+				listNodes: func(_ context.Context, _ int16, _ []string, _, _, poller *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+					got, called = poller, true
+					return api.NodePage{}, nil
+				},
+				listNodesSorted: func(_ context.Context, _ int16, _ []string, _, _, poller *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
+					got, called = poller, true
+					return api.NodePage{}, nil
+				},
+			}))
+			url := "/nodes" + tc.query
+			if sorted {
+				url += map[bool]string{true: "&", false: "?"}[tc.query != ""] + "sort=name"
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, url, nil))
+			if w.Code != http.StatusOK || !called {
+				t.Fatalf("%s: status %d, called %v", url, w.Code, called)
+			}
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Errorf("%s: poller = %v, want %v", url, got, tc.want)
+			}
+		}
+	}
+}
+
+func TestListNodes_InvalidPoller(t *testing.T) {
+	r := chi.NewRouter()
+	r.Get("/nodes", listNodes(stubReader{}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nodes?poller=banana", nil))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "invalid poller value") {
+		t.Errorf("body = %s", w.Body.String())
 	}
 }

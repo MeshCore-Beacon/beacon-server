@@ -50,7 +50,7 @@ func TestListLimits(t *testing.T) {
 			got = limit
 			return api.Page[api.AdvertObservation]{}, nil
 		},
-		listNodes: func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+		listNodes: func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
 			calls++
 			got = limit
 			return api.NodePage{}, nil
@@ -107,7 +107,7 @@ func TestListLimits(t *testing.T) {
 		},
 	}
 	router := chi.NewRouter()
-	router.Mount("/nodes", NodesRouter(reader))
+	router.Mount("/nodes", NodesRouter(reader, true))
 	router.Mount("/observers", ObserversRouter(reader))
 	router.Mount("/packets", PacketsRouter(reader))
 	router.Mount("/channels", ChannelsRouter(reader))

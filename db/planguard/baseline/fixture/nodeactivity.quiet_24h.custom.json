@@ -1,0 +1,13 @@
+[
+ "Aggregate partial=Simple {Sorted}",
+ "  Sort",
+ "    Result",
+ "      Append",
+ "        Seq Scan on analytics_hourly_node_activity a",
+ "        Nested Loop",
+ "          Index Scan on packets p using idx_packets_origin scan=Forward",
+ "          Index Scan on packet_observations po using idx_observations_packet scan=Forward",
+ "        Nested Loop",
+ "          Index Scan on packets lp using idx_packets_origin_last_heard scan=Forward",
+ "          Index Scan on packet_observations lo using idx_observations_packet scan=Forward"
+]

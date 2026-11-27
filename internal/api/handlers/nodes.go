@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"net/http"
@@ -20,19 +21,100 @@ import (
 // NodesRouter mounts all /nodes routes onto a subrouter.
 //
 // GET  /nodes                       → listNodes
+// GET  /nodes/telemetry/latest      → listLatestNodeReadings
 // GET  /nodes/{nodeId}              → getNode
 // GET  /nodes/{nodeId}/observations → listNodeObservations
 // GET  /nodes/{nodeId}/activity     → getNodeActivity
-func NodesRouter(reader api.Reader) http.Handler {
+// GET  /nodes/{nodeId}/telemetry    → getNodeTelemetry
+// GET  /nodes/{nodeId}/polling      → getNodePolling
+//
+// With pollingEnabled false the telemetry and polling routes answer as for a node nobody polls,
+// without reading the readings or assignments.
+func NodesRouter(reader api.Reader, pollingEnabled bool) http.Handler {
 	r := chi.NewRouter()
+	telemetryReader := reader
+	if !pollingEnabled {
+		telemetryReader = unpolledReader{reader}
+	}
 	r.Get("/", listNodes(reader))
+	r.Get("/telemetry/latest", listLatestNodeReadings(telemetryReader))
 	r.Route("/{nodeId}", func(r chi.Router) {
 		r.Get("/", getNode(reader))
 		r.Get("/observations", listNodeObservations(reader))
 		r.Get("/activity", getNodeActivity(reader))
+		r.Get("/telemetry", getNodeTelemetry(telemetryReader))
+		r.Get("/polling", getNodePolling(telemetryReader))
 		r.Get("/neighbors", listNodeNeighbors(reader))
 	})
 	return r
+}
+
+// unpolledReader answers the two polling reads as for a node with no readings. It still looks the
+// node up, so an unknown node stays a 404.
+type unpolledReader struct{ api.Reader }
+
+func (u unpolledReader) exists(ctx context.Context, nodeID uuid.UUID) error {
+	node, err := u.Reader.GetNode(ctx, nodeID)
+	if err == nil && node == nil {
+		return pgx.ErrNoRows
+	}
+	return err
+}
+
+func (u unpolledReader) GetNodeReadings(ctx context.Context, nodeID uuid.UUID, _, _ time.Time, _ bool) ([]api.NodeReading, bool, int, error) {
+	return nil, false, 0, u.exists(ctx, nodeID)
+}
+
+func (u unpolledReader) ListLatestNodeReadings(context.Context, []string, time.Time) ([]api.NodeLatestReading, error) {
+	return []api.NodeLatestReading{}, nil
+}
+
+func (u unpolledReader) GetNodePolling(ctx context.Context, nodeID uuid.UUID) (*api.NodePolling, error) {
+	if err := u.exists(ctx, nodeID); err != nil {
+		return nil, err
+	}
+	return &api.NodePolling{}, nil
+}
+
+// latestReadingsWindow is how old a reading the latest readings route still returns.
+const latestReadingsWindow = 7 * 24 * time.Hour
+
+// listLatestNodeReadings godoc
+//
+//	@Summary	Latest battery and temperature of every polled node
+//	@Tags		Nodes
+//	@Produce	json
+//	@Param		iata		query		string	false	"Filter by single IATA code (case-insensitive)"
+//	@Param		iatas		query		string	false	"Filter by multiple IATA codes, comma-separated e.g. YVR,YYJ"
+//	@Param		regionId	query		int		false	"Filter by region ID, expands to member IATAs"
+//	@Param		region		query		string	false	"Filter by region slug, expands to member IATAs"
+//	@Success	200			{object}	api.NodeLatestReadings
+//	@Failure	400			{object}	handlers.APIError
+//	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
+//	@Router		/nodes/telemetry/latest [get]
+func listLatestNodeReadings(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		iatas := parseIATAs(r)
+		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
+			regionIATAs, err := resolveRegionIATAs(r.Context(), regionIDStr, r.URL.Query().Get("region"), reader)
+			if err != nil {
+				respondRegionError(w, err)
+				return
+			}
+			iatas = appendRegionIATAs(iatas, regionIATAs)
+		}
+		now := time.Now()
+		items, err := reader.ListLatestNodeReadings(r.Context(), iatas, now.Add(-latestReadingsWindow))
+		if err != nil {
+			respondReaderError(w, err, "internal server error")
+			return
+		}
+		if items == nil {
+			items = []api.NodeLatestReading{}
+		}
+		respond(w, http.StatusOK, api.NodeLatestReadings{GeneratedAt: now.UnixMilli(), Items: items})
+	}
 }
 
 // listNodes godoc
@@ -52,6 +134,7 @@ func NodesRouter(reader api.Reader) http.Handler {
 //	@Param		pubkeyPrefix			query		string	false	"Partial public key match: hex prefix, case-insensitive"
 //	@Param		supportsMultibytePaths	query		bool	false	"Filter by multibyte path support (true/false); omit for no filter"
 //	@Param		supportsMultibyteTraces	query		bool	false	"Filter by multibyte trace support (true/false); omit for no filter"
+//	@Param		poller	query		bool	false	"Filter by poller role (true/false); omit for no filter"
 //	@Param		neighbors				query		bool	false	"Include each node's known neighbor IDs (neighborIds field). Bare ?neighbors or ?neighbors=true enables it; omit/false for none"
 //	@Param		cursor					query		int		false	"last_seen epoch ms of last item for pagination"
 //	@Param		pageCursor				query		string	false	"Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent"
@@ -137,7 +220,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 				respondRegionError(w, err)
 				return
 			}
-			iatas = append(iatas, regionIATAs...)
+			iatas = appendRegionIATAs(iatas, regionIATAs)
 		}
 		name := r.URL.Query().Get("name")
 		scope := r.URL.Query().Get("scope")
@@ -159,6 +242,15 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 			}
 			supportsMultibyteTraces = &b
 		}
+		var poller *bool
+		if v := r.URL.Query().Get("poller"); v != "" {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid poller value")
+				return
+			}
+			poller = &b
+		}
 		var includeNeighbors bool
 		if vals, ok := r.URL.Query()["neighbors"]; ok {
 			v := vals[0] // bare `?neighbors` (no `=`) parses as ""
@@ -175,13 +267,13 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 		}
 		var nodes api.NodePage
 		if sorted {
-			nodes, err = reader.ListNodesSorted(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, sort, sortCursor, limit, includeNeighbors)
+			nodes, err = reader.ListNodesSorted(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, poller, pubkey, pubkeyPrefix, name, scope, sort, sortCursor, limit, includeNeighbors)
 			nodes.Sort, nodes.Order = sort.By, "asc"
 			if sort.Descending {
 				nodes.Order = "desc"
 			}
 		} else {
-			nodes, err = reader.ListNodes(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
+			nodes, err = reader.ListNodes(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, poller, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
 			nodes.Sort, nodes.Order = "lastSeen", "desc"
 		}
 		if err != nil {
@@ -294,7 +386,7 @@ func listNodeObservations(reader api.Reader) http.HandlerFunc {
 //	@Tags		Nodes
 //	@Produce	json
 //	@Param		nodeId	path		string	true	"Node UUID"
-//	@Param		range	query		string	false	"Trailing window as a Go duration, max 720h (default 24h)"
+//	@Param		range	query		string	false	"Trailing hourly window as a Go duration, from 1h to 720h (default 24h)"
 //	@Success	200		{object}	api.NodeActivity
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	404		{object}	handlers.APIError
@@ -313,8 +405,8 @@ func getNodeActivity(reader api.Reader) http.HandlerFunc {
 			rangeParam = "24h"
 		}
 		window, err := time.ParseDuration(rangeParam)
-		if err != nil || window <= 0 || window > 720*time.Hour {
-			respondError(w, http.StatusBadRequest, "invalid range, use a duration up to 720h e.g. 24h, 168h, 720h")
+		if err != nil || window < time.Hour || window > 720*time.Hour {
+			respondError(w, http.StatusBadRequest, "invalid range, use a duration from 1h to 720h e.g. 24h, 168h, 720h")
 			return
 		}
 		activity, err := reader.GetNodeActivity(r.Context(), nodeID, window)
@@ -369,4 +461,117 @@ func isHexString(s string) bool {
 		}
 	}
 	return true
+}
+
+// nodeTelemetryRanges maps each allowed range to its default bucket size.
+var nodeTelemetryRanges = map[string]string{"24h": "1h", "72h": "1h", "168h": "6h", "720h": "24h"}
+
+var nodeTelemetryIntervals = map[string]time.Duration{"1h": time.Hour, "6h": 6 * time.Hour, "24h": 24 * time.Hour}
+
+// getNodeTelemetry godoc
+//
+//	@Summary		Get a polled node's telemetry history
+//	@Description	Repeater readings bucketed into UTC windows. Counters are increments within the bucket, uptimeSeconds is the bucket maximum, the rest are averages; a field is omitted when no reading in the bucket carried it. Untrusted readings are left out unless include=untrusted, and counted in untrustedReadings. polled is true when the node has any reading at all. Answers as for an unpolled node when polling is off.
+//	@Tags			Nodes
+//	@Produce		json
+//	@Param			nodeId		path		string	true	"Node UUID"
+//	@Param			range		query		string	false	"Window: 24h, 72h, 168h (default) or 720h"	Enums(24h, 72h, 168h, 720h)
+//	@Param			interval	query		string	false	"Bucket size: 1h, 6h or 24h. Defaults to 1h for 24h and 72h, 6h for 168h, 24h for 720h"	Enums(1h, 6h, 24h)
+//	@Param			include		query		string	false	"untrusted to include readings from observers without advert evidence for the node"	Enums(untrusted)
+//	@Success		200			{object}	api.NodeTelemetry
+//	@Failure		400			{object}	handlers.APIError
+//	@Failure		404			{object}	handlers.APIError
+//	@Failure		500			{object}	handlers.APIError
+//	@Failure		503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
+//	@Router			/nodes/{nodeId}/telemetry [get]
+func getNodeTelemetry(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		nodeID, err := uuid.Parse(chi.URLParam(r, "nodeId"))
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid node ID")
+			return
+		}
+		q := r.URL.Query()
+		rangeParam := q.Get("range")
+		if rangeParam == "" {
+			rangeParam = "168h"
+		}
+		defaultInterval, ok := nodeTelemetryRanges[rangeParam]
+		if !ok {
+			respondError(w, http.StatusBadRequest, "invalid range, use 24h, 72h, 168h or 720h")
+			return
+		}
+		intervalParam := q.Get("interval")
+		if intervalParam == "" {
+			intervalParam = defaultInterval
+		}
+		size, ok := nodeTelemetryIntervals[intervalParam]
+		if !ok {
+			respondError(w, http.StatusBadRequest, "invalid interval, use 1h, 6h or 24h")
+			return
+		}
+		include := q.Get("include")
+		if include != "" && include != "untrusted" {
+			respondError(w, http.StatusBadRequest, "invalid include, use untrusted")
+			return
+		}
+		window, _ := time.ParseDuration(rangeParam)
+		since := time.Now().Add(-window)
+		readings, polled, untrusted, err := reader.GetNodeReadings(r.Context(), nodeID, since, time.Time{}, include == "untrusted")
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondError(w, http.StatusNotFound, "node not found")
+			return
+		}
+		if err != nil {
+			respondReaderError(w, err, "internal server error")
+			return
+		}
+		respond(w, http.StatusOK, api.NodeTelemetry{
+			Range:             rangeParam,
+			Interval:          intervalParam,
+			Polled:            polled,
+			UntrustedReadings: untrusted,
+			Points:            api.BucketNodeReadings(readings, since, size),
+		})
+	}
+}
+
+// getNodePolling godoc
+//
+//	@Summary		Get who polls a node
+//	@Description	The observer assigned to poll the node (null when nobody is), its standbys in rank order, and the time of the newest trusted reading. polled is true when the node has any reading at all. Answers as for an unpolled node when polling is off.
+//	@Tags			Nodes
+//	@Produce		json
+//	@Param			nodeId	path		string	true	"Node UUID"
+//	@Success		200		{object}	api.NodePolling
+//	@Failure		400		{object}	handlers.APIError
+//	@Failure		404		{object}	handlers.APIError
+//	@Failure		500		{object}	handlers.APIError
+//	@Failure		503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
+//	@Router			/nodes/{nodeId}/polling [get]
+func getNodePolling(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		nodeID, err := uuid.Parse(chi.URLParam(r, "nodeId"))
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid node ID")
+			return
+		}
+		out, err := reader.GetNodePolling(r.Context(), nodeID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondError(w, http.StatusNotFound, "node not found")
+			return
+		}
+		if err != nil {
+			respondReaderError(w, err, "internal server error")
+			return
+		}
+		if out == nil {
+			respondError(w, http.StatusNotFound, "node not found")
+			return
+		}
+		if out.Standbys == nil {
+			out.Standbys = []api.NodePollingObserver{}
+		}
+		respond(w, http.StatusOK, out)
+	}
 }

@@ -792,6 +792,16 @@ WITH src AS (
   WHERE p.origin_pubkey = $1::bytea
     AND p.first_heard_at >= $5::timestamptz AND p.first_heard_at < $6::timestamptz
     AND po.heard_at >= GREATEST($2::timestamptz, $4::timestamptz) AND po.heard_at < $3::timestamptz
+  UNION ALL
+  SELECT lo.heard_at, 1::bigint, ls.snr::double precision, (ls.snr IS NOT NULL)::int::bigint,
+         ls.rssi::bigint, (ls.rssi IS NOT NULL)::int::bigint, lo.hop_count::bigint, 1::bigint
+  FROM packets lp
+  JOIN packet_observations lo ON lo.packet_hash = lp.packet_hash
+  CROSS JOIN LATERAL (SELECT CASE WHEN NOT (COALESCE(lo.rssi, 0) = 0 AND COALESCE(lo.snr, 0) = 0) THEN lo.snr END AS snr,
+                             CASE WHEN NOT (COALESCE(lo.rssi, 0) = 0 AND COALESCE(lo.snr, 0) = 0) THEN lo.rssi END AS rssi) ls
+  WHERE lp.origin_pubkey = $1::bytea
+    AND lp.last_heard_at >= $7::timestamptz AND lp.first_heard_at < $5::timestamptz
+    AND lo.heard_at >= GREATEST($2::timestamptz, $4::timestamptz) AND lo.heard_at < $3::timestamptz
 )
 SELECT
   date_trunc('hour', t, 'UTC')::timestamptz AS bucket,
@@ -814,6 +824,7 @@ type GetNodeActivityHourlyParams struct {
 	TailStart    pgtype.Timestamptz `json:"tail_start"`
 	PacketFrom   pgtype.Timestamptz `json:"packet_from"`
 	PacketUntil  pgtype.Timestamptz `json:"packet_until"`
+	LateFrom     pgtype.Timestamptz `json:"late_from"`
 }
 
 type GetNodeActivityHourlyRow struct {
@@ -828,7 +839,8 @@ type GetNodeActivityHourlyRow struct {
 }
 
 // Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
-// the node's packets first heard in [@packet_from, @packet_until).
+// the node's packets first heard in [@packet_from, @packet_until) and through its older packets heard again
+// since @late_from. Each branch reads one range of an (origin_pubkey, time) index, and no packet is in both.
 func (q *Queries) GetNodeActivityHourly(ctx context.Context, arg GetNodeActivityHourlyParams) ([]GetNodeActivityHourlyRow, error) {
 	rows, err := q.db.Query(ctx, getNodeActivityHourly,
 		arg.OriginPubkey,
@@ -837,6 +849,7 @@ func (q *Queries) GetNodeActivityHourly(ctx context.Context, arg GetNodeActivity
 		arg.TailStart,
 		arg.PacketFrom,
 		arg.PacketUntil,
+		arg.LateFrom,
 	)
 	if err != nil {
 		return nil, err
@@ -866,8 +879,9 @@ func (q *Queries) GetNodeActivityHourly(ctx context.Context, arg GetNodeActivity
 }
 
 const getNodeByID = `-- name: GetNodeByID :one
-SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.location_source, n.last_advert_at, n.supports_multibyte_paths, n.supports_multibyte_traces, n.default_scope_id, n.min_firmware_version, n.first_seen, n.last_seen, n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, n.metadata, n.device_clock_drift_seconds, ts.name AS default_scope_name,
+SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.location_source, n.last_advert_at, n.supports_multibyte_paths, n.supports_multibyte_traces, n.default_scope_id, n.min_firmware_version, n.first_seen, n.last_seen, n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, n.metadata, n.device_clock_drift_seconds, n.prev_clock_drift_seconds, ts.name AS default_scope_name,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key) AS is_poller,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
@@ -902,8 +916,10 @@ type GetNodeByIDRow struct {
 	RadioBwKhz              *float32           `json:"radio_bw_khz"`
 	Metadata                []byte             `json:"metadata"`
 	DeviceClockDriftSeconds *int64             `json:"device_clock_drift_seconds"`
+	PrevClockDriftSeconds   *int64             `json:"prev_clock_drift_seconds"`
 	DefaultScopeName        *string            `json:"default_scope_name"`
 	IsObserver              bool               `json:"is_observer"`
+	IsPoller                bool               `json:"is_poller"`
 	ObserverID              uuid.UUID          `json:"observer_id"`
 	Iatas                   []byte             `json:"iatas"`
 	KnownNeighborCount      int64              `json:"known_neighbor_count"`
@@ -933,8 +949,10 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow
 		&i.RadioBwKhz,
 		&i.Metadata,
 		&i.DeviceClockDriftSeconds,
+		&i.PrevClockDriftSeconds,
 		&i.DefaultScopeName,
 		&i.IsObserver,
+		&i.IsPoller,
 		&i.ObserverID,
 		&i.Iatas,
 		&i.KnownNeighborCount,
@@ -4395,6 +4413,11 @@ WHERE
   AND (n.last_seen, n.id) < ($7::timestamptz, $12::uuid)
   AND ($9::text = '' OR ts.name = $9::text)
   AND ($11::text = '' OR encode(n.public_key, 'hex') ILIKE $11 || '%')
+  AND (
+    $13::text = 'any'
+    OR ($13::text = 'true' AND EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key))
+    OR ($13::text = 'false' AND NOT EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key))
+  )
 ORDER BY n.last_seen DESC, n.id DESC
 LIMIT $8
 )
@@ -4403,6 +4426,7 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key) AS is_poller,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
   (CASE WHEN $10::bool THEN
@@ -4425,6 +4449,7 @@ type ListNodesParams struct {
 	Column10 bool               `json:"column_10"`
 	Column11 string             `json:"column_11"`
 	Column12 uuid.UUID          `json:"column_12"`
+	Column13 string             `json:"column_13"`
 }
 
 type ListNodesRow struct {
@@ -4441,6 +4466,7 @@ type ListNodesRow struct {
 	DefaultScopeName   *string            `json:"default_scope_name"`
 	Iatas              []byte             `json:"iatas"`
 	IsObserver         bool               `json:"is_observer"`
+	IsPoller           bool               `json:"is_poller"`
 	ObserverID         uuid.UUID          `json:"observer_id"`
 	KnownNeighborCount int64              `json:"known_neighbor_count"`
 	NeighborIds        []uuid.UUID        `json:"neighbor_ids"`
@@ -4461,6 +4487,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 		arg.Column10,
 		arg.Column11,
 		arg.Column12,
+		arg.Column13,
 	)
 	if err != nil {
 		return nil, err
@@ -4483,6 +4510,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 			&i.DefaultScopeName,
 			&i.Iatas,
 			&i.IsObserver,
+			&i.IsPoller,
 			&i.ObserverID,
 			&i.KnownNeighborCount,
 			&i.NeighborIds,
@@ -4535,27 +4563,33 @@ WHERE
   AND ($9::text = '' OR n.name ILIKE '%' || $9::text || '%')
   AND ($10::text = '' OR ts.name = $10::text)
   AND ($11::text = '' OR encode(n.public_key, 'hex') ILIKE $11::text || '%')
+  AND (
+    $12::text = 'any'
+    OR ($12::text = 'true' AND EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key))
+    OR ($12::text = 'false' AND NOT EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key))
+  )
 ), page AS (
 SELECT id, public_key, node_type, name, latitude, longitude, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, default_scope_name, k_null, k_text, k_num, k_seen FROM keyed
-WHERE NOT $12::bool
-  OR k_null > $13::int
-  OR (k_null = $13::int AND (
-    ($2::bool AND k_text < $14::text)
-    OR (NOT $2::bool AND k_text > $14::text)
-    OR (k_text = $14::text AND (
-      k_num > $15::bigint OR (k_num = $15::bigint AND (
-        k_seen > $16::bigint OR (k_seen = $16::bigint AND id > $17::uuid)))))))
+WHERE NOT $13::bool
+  OR k_null > $14::int
+  OR (k_null = $14::int AND (
+    ($2::bool AND k_text < $15::text)
+    OR (NOT $2::bool AND k_text > $15::text)
+    OR (k_text = $15::text AND (
+      k_num > $16::bigint OR (k_num = $16::bigint AND (
+        k_seen > $17::bigint OR (k_seen = $17::bigint AND id > $18::uuid)))))))
 ORDER BY k_null,
   CASE WHEN NOT $2::bool THEN k_text END,
   CASE WHEN $2::bool THEN k_text END DESC,
   k_num, k_seen, id
-LIMIT $18
+LIMIT $19
 )
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
   n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, n.default_scope_name, n.k_null, n.k_text::text AS k_text, n.k_num, n.k_seen,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key) AS is_poller,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
   (CASE WHEN $1::bool THEN
@@ -4580,6 +4614,7 @@ type ListNodesSortedParams struct {
 	Name             string    `json:"name"`
 	Scope            string    `json:"scope"`
 	PubkeyPrefix     string    `json:"pubkey_prefix"`
+	Poller           string    `json:"poller"`
 	HasCursor        bool      `json:"has_cursor"`
 	CursorNull       int32     `json:"cursor_null"`
 	CursorText       string    `json:"cursor_text"`
@@ -4607,6 +4642,7 @@ type ListNodesSortedRow struct {
 	KSeen              int64              `json:"k_seen"`
 	Iatas              []byte             `json:"iatas"`
 	IsObserver         bool               `json:"is_observer"`
+	IsPoller           bool               `json:"is_poller"`
 	ObserverID         uuid.UUID          `json:"observer_id"`
 	KnownNeighborCount int64              `json:"known_neighbor_count"`
 	NeighborIds        []uuid.UUID        `json:"neighbor_ids"`
@@ -4627,6 +4663,7 @@ func (q *Queries) ListNodesSorted(ctx context.Context, arg ListNodesSortedParams
 		arg.Name,
 		arg.Scope,
 		arg.PubkeyPrefix,
+		arg.Poller,
 		arg.HasCursor,
 		arg.CursorNull,
 		arg.CursorText,
@@ -4660,6 +4697,7 @@ func (q *Queries) ListNodesSorted(ctx context.Context, arg ListNodesSortedParams
 			&i.KSeen,
 			&i.Iatas,
 			&i.IsObserver,
+			&i.IsPoller,
 			&i.ObserverID,
 			&i.KnownNeighborCount,
 			&i.NeighborIds,
@@ -6505,25 +6543,29 @@ func (q *Queries) PruneZoneBoundaries(ctx context.Context, keep []string) ([]str
 }
 
 const reconfirmNeighbors = `-- name: ReconfirmNeighbors :exec
-DELETE FROM node_neighbors nn
-WHERE NOT EXISTS (
-    SELECT 1 FROM node_short_ids ns
-    WHERE ns.node_id = nn.neighbor_id
-      AND ns.iata = nn.iata
+WITH invalid AS MATERIALIZED (
+    SELECT e.iata, e.neighbor_id
+    FROM (SELECT DISTINCT iata, neighbor_id FROM node_neighbors) e
+    LEFT JOIN LATERAL (
+        SELECT s.node_id FROM node_short_ids s
+        WHERE s.iata = e.iata AND s.node_id = e.neighbor_id
+          AND NOT EXISTS (
+              SELECT 1 FROM node_short_ids peer
+              WHERE peer.iata = s.iata AND peer.prefix_4 = s.prefix_4
+                AND peer.node_id <> s.node_id
+          )
+        LIMIT 1
+    ) valid ON true
+    WHERE valid.node_id IS NULL
 )
-OR (
-    SELECT COUNT(*) FROM node_short_ids ns
-    WHERE ns.iata = nn.iata
-      AND ns.prefix_4 = (
-          SELECT prefix_4 FROM node_short_ids
-          WHERE node_id = nn.neighbor_id
-            AND iata = nn.iata
-      )
-) > 1
+DELETE FROM node_neighbors nn USING invalid
+WHERE nn.iata = invalid.iata AND nn.neighbor_id = invalid.neighbor_id
 `
 
 // Delete node_neighbors where the neighbor has departed from node_short_ids
 // for that IATA, or where its prefix_4 is now ambiguous.
+// Check each distinct regional neighbor once. Keep the one-row lookup correlated:
+// a flattened anti-join can rescan the whole identity catalogue for each edge.
 func (q *Queries) ReconfirmNeighbors(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, reconfirmNeighbors)
 	return err
@@ -6584,29 +6626,60 @@ func (q *Queries) ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesB
 }
 
 const reconfirmSliceEnd = `-- name: ReconfirmSliceEnd :one
-SELECT r.iata, r.path_key FROM known_routes r
-WHERE (r.iata, r.path_key) > ($1::bpchar, $2::bytea)
-ORDER BY r.iata, r.path_key
-OFFSET $3 LIMIT 1
+SELECT slice.iata, slice.path_key, (count(*) OVER ())::bigint AS skipped
+FROM (
+    SELECT r.iata, r.path_key FROM known_routes r
+    WHERE (r.iata, r.path_key) > ($1::bpchar, $2::bytea)
+    ORDER BY r.iata, r.path_key
+    LIMIT $3::int
+) AS slice
+ORDER BY slice.iata DESC, slice.path_key DESC LIMIT 1
 `
 
 type ReconfirmSliceEndParams struct {
-	AfterIata  string `json:"after_iata"`
-	AfterKey   []byte `json:"after_key"`
-	OffsetRows int32  `json:"offset_rows"`
+	AfterIata string `json:"after_iata"`
+	AfterKey  []byte `json:"after_key"`
+	BatchSize int32  `json:"batch_size"`
 }
 
 type ReconfirmSliceEndRow struct {
 	Iata    string `json:"iata"`
 	PathKey []byte `json:"path_key"`
+	Skipped int64  `json:"skipped"`
 }
 
-// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
+// Count the bounded slice and return its last key. A short slice ends the cycle.
 func (q *Queries) ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error) {
-	row := q.db.QueryRow(ctx, reconfirmSliceEnd, arg.AfterIata, arg.AfterKey, arg.OffsetRows)
+	row := q.db.QueryRow(ctx, reconfirmSliceEnd, arg.AfterIata, arg.AfterKey, arg.BatchSize)
 	var i ReconfirmSliceEndRow
-	err := row.Scan(&i.Iata, &i.PathKey)
+	err := row.Scan(&i.Iata, &i.PathKey, &i.Skipped)
 	return i, err
+}
+
+const recordClockDrift = `-- name: RecordClockDrift :exec
+WITH ins AS (
+    INSERT INTO node_clock_drifts (node_id, advert_at, drift_seconds) VALUES ($1, now(), $2)
+    ON CONFLICT (node_id, advert_at) DO NOTHING
+    RETURNING advert_at
+), recent AS (
+    SELECT advert_at FROM node_clock_drifts WHERE node_id = $1
+    UNION ALL SELECT advert_at FROM ins
+)
+DELETE FROM node_clock_drifts x
+WHERE x.node_id = $1
+  AND x.advert_at < (SELECT advert_at FROM recent ORDER BY advert_at DESC OFFSET 15 LIMIT 1)
+`
+
+type RecordClockDriftParams struct {
+	NodeID       uuid.UUID `json:"node_id"`
+	DriftSeconds int64     `json:"drift_seconds"`
+}
+
+// Keep 16 adverts, including the INSERT's row. Sibling CTEs share a snapshot:
+// the table scan alone cannot see the new row. A conflict returns no extra row.
+func (q *Queries) RecordClockDrift(ctx context.Context, arg RecordClockDriftParams) error {
+	_, err := q.db.Exec(ctx, recordClockDrift, arg.NodeID, arg.DriftSeconds)
+	return err
 }
 
 const recordTrace = `-- name: RecordTrace :exec
@@ -8118,8 +8191,9 @@ ON CONFLICT (public_key) DO UPDATE SET
   radio_freq_mhz  = EXCLUDED.radio_freq_mhz,
   radio_sf        = EXCLUDED.radio_sf,
   radio_bw_khz    = EXCLUDED.radio_bw_khz,
+  prev_clock_drift_seconds = nodes.device_clock_drift_seconds,
   device_clock_drift_seconds = EXCLUDED.device_clock_drift_seconds
-RETURNING id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, default_scope_id, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata, device_clock_drift_seconds
+RETURNING id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, default_scope_id, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata, device_clock_drift_seconds, prev_clock_drift_seconds
 `
 
 type UpsertNodeParams struct {
@@ -8172,6 +8246,7 @@ func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, e
 		&i.RadioBwKhz,
 		&i.Metadata,
 		&i.DeviceClockDriftSeconds,
+		&i.PrevClockDriftSeconds,
 	)
 	return i, err
 }

@@ -92,7 +92,7 @@ func TestAdvertLocationPresence(t *testing.T) {
 			}
 			worker, store := newTestWorker()
 			packet := buildAdvertPacketWithData(t, data, tc.tamper)
-			worker.handlePayloadTypeSideEffects(context.Background(), packet, "YOW", []byte{1}, RadioSettings{}, nil, nil, nil, 0, false, false)
+			worker.handlePayloadTypeSideEffects(context.Background(), packet, "YOW", []byte{1}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false, false)
 			if tc.tamper {
 				if store.upsertNodeCalls != 0 {
 					t.Fatal("invalid signature updated the node")
@@ -146,7 +146,7 @@ func TestAdvertClearEmitsNullLocation(t *testing.T) {
 				data = binary.LittleEndian.AppendUint32(data, uint32(tc.lat))
 				data = binary.LittleEndian.AppendUint32(data, uint32(tc.lon))
 			}
-			w.handlePayloadTypeSideEffects(ctx, buildAdvertPacketWithData(t, data, false), "AAA", []byte{1}, RadioSettings{}, nil, nil, nil, 0, false, false)
+			w.handlePayloadTypeSideEffects(ctx, buildAdvertPacketWithData(t, data, false), "AAA", []byte{1}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false, false)
 			for {
 				select {
 				case event := <-client.Send:
@@ -175,7 +175,7 @@ func TestHandlePayloadTypeSideEffects_Advert_ValidSignature_UpsertsNode(t *testi
 	w, db := newTestWorker()
 	packet := buildAdvertPacket(t, false)
 
-	w.handlePayloadTypeSideEffects(context.Background(), packet, "TEST", []byte{0x01}, RadioSettings{}, nil, nil, nil, 0, false, false)
+	w.handlePayloadTypeSideEffects(context.Background(), packet, "TEST", []byte{0x01}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false, false)
 
 	if db.upsertNodeCalls != 1 {
 		t.Errorf("expected UpsertNode to be called once for a validly-signed advert, got %d", db.upsertNodeCalls)
@@ -186,7 +186,7 @@ func TestHandlePayloadTypeSideEffects_Advert_InvalidSignature_SkipsUpsert(t *tes
 	w, db := newTestWorker()
 	packet := buildAdvertPacket(t, true)
 
-	w.handlePayloadTypeSideEffects(context.Background(), packet, "TEST", []byte{0x01}, RadioSettings{}, nil, nil, nil, 0, false, false)
+	w.handlePayloadTypeSideEffects(context.Background(), packet, "TEST", []byte{0x01}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false, false)
 
 	if db.upsertNodeCalls != 0 {
 		t.Errorf("expected UpsertNode NOT to be called for a tampered advert, got %d calls", db.upsertNodeCalls)
@@ -222,7 +222,7 @@ func TestHandlePayloadTypeSideEffects_GrpTxt_KnownKey_OnlyUpsertsKeyedChannel(t 
 	}}
 	packet := buildGrpTxtPacket(t, channelHash, psk)
 
-	w.handlePayloadTypeSideEffects(context.Background(), packet, "TEST", []byte{0x02}, RadioSettings{}, nil, nil, nil, 0, false, false)
+	w.handlePayloadTypeSideEffects(context.Background(), packet, "TEST", []byte{0x02}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false, false)
 
 	if db.upsertChannelCalls != 1 {
 		t.Errorf("expected UpsertChannel to be called once, got %d", db.upsertChannelCalls)
@@ -237,7 +237,7 @@ func TestHandlePayloadTypeSideEffects_GrpTxt_UnknownKey_OnlyUpsertsHashOnlyChann
 	channelHash := byte(0x99)
 	packet := buildGrpTxtPacket(t, channelHash, make([]byte, 16))
 
-	w.handlePayloadTypeSideEffects(context.Background(), packet, "TEST", []byte{0x03}, RadioSettings{}, nil, nil, nil, 0, false, false)
+	w.handlePayloadTypeSideEffects(context.Background(), packet, "TEST", []byte{0x03}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false, false)
 
 	if db.upsertChannelHashOnlyCalls != 1 {
 		t.Errorf("expected UpsertChannelHashOnly to be called once for an unknown-key channel, got %d", db.upsertChannelHashOnlyCalls)
@@ -331,5 +331,40 @@ func TestHandlePacket_Trace_RecordsTrace(t *testing.T) {
 		if h.IATA != "YOW" || h.HeardAt.IsZero() || hex.EncodeToString(h.TraceTag) != "efbeadde" {
 			t.Errorf("unexpected hearing %+v", h)
 		}
+	}
+}
+
+func TestAdvertNodeEventCarriesIsPoller(t *testing.T) {
+	for _, poller := range []bool{true, false} {
+		w, db := newTestWorker()
+		db.isPoller = poller
+		go w.hub.Run()
+		client := w.hub.NewClient()
+		w.hub.AddScope(client, "poller", hub.Scope{Events: []hub.EventType{hub.EventNodeUpdate, hub.EventObserverStatus}})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		waitForSummarySubscriber(t, ctx, w.hub, client)
+		w.handlePayloadTypeSideEffects(ctx, buildAdvertPacket(t, false), "AAA", []byte{1}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false, false)
+		func() {
+			for {
+				select {
+				case event := <-client.Send:
+					if event.Type != hub.EventNodeUpdate {
+						continue
+					}
+					var payload map[string]any
+					if err := json.Unmarshal(event.Payload, &payload); err != nil {
+						t.Fatal(err)
+					}
+					if got, ok := payload["isPoller"]; !ok || got != poller {
+						t.Fatalf("isPoller = %v (present=%v), want %v: %s", got, ok, poller, event.Payload)
+					}
+					return
+				case <-ctx.Done():
+					t.Fatal("node update not received")
+				}
+			}
+		}()
+		w.hub.Remove(client)
+		cancel()
 	}
 }

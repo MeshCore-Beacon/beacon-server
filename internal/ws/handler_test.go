@@ -13,9 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/wsticket"
 	"github.com/coder/websocket"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestAllowedOrigins(t *testing.T) {
@@ -368,5 +370,78 @@ func TestOriginNotRequiredByDefault(t *testing.T) {
 	defer conn.CloseNow()
 	if _, _, err := conn.Read(ctx); err != nil {
 		t.Fatalf("no hello: %v", err)
+	}
+}
+
+type regionReader struct{ api.Reader }
+
+func (regionReader) GetRegionBySlug(_ context.Context, slug string) (*api.Region, error) {
+	switch slug {
+	case "empty":
+		return &api.Region{}, nil
+	case "west":
+		return &api.Region{IATAs: []string{"YVR"}}, nil
+	}
+	return nil, pgx.ErrNoRows
+}
+
+// A subscription to regions that give no IATAs is acknowledged and receives nothing, not everything.
+func TestSubscribeToRegionsWithoutIATAsReceivesNothing(t *testing.T) {
+	h := hub.New()
+	go h.Run()
+	server := httptest.NewServer(Handler(h, regionReader{}, Limits{MaxConnsPerIP: 10, MaxConnectsPerMinute: 100}, Access{}))
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	read := func(conn *websocket.Conn) map[string]json.RawMessage {
+		t.Helper()
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var msg map[string]json.RawMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			t.Fatal(err)
+		}
+		return msg
+	}
+	connect := func(scope string) *websocket.Conn {
+		t.Helper()
+		conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { conn.CloseNow() })
+		read(conn) // hello
+		if err := conn.Write(ctx, websocket.MessageText, []byte(`{"v":1,"type":"subscribe","id":"s","scope":`+scope+`}`)); err != nil {
+			t.Fatal(err)
+		}
+		if reply := read(conn); string(reply["type"]) != `"subscribed"` || len(reply["subscriptionId"]) < 3 {
+			t.Fatalf("scope %s: reply %v", scope, reply)
+		}
+		return conn
+	}
+	silent := []*websocket.Conn{
+		connect(`{"regionSlugs":["empty"]}`),
+		connect(`{"regionSlugs":["missing"]}`),
+		connect(`{"regionIds":["not-a-number"]}`),
+	}
+	west := connect(`{"regionSlugs":["west","missing"]}`)
+	named := connect(`{"iatas":["YVR"],"regionSlugs":["empty"]}`)
+	all := connect(`{}`)
+	time.Sleep(20 * time.Millisecond) // let the hub apply the subscriptions
+	h.Broadcast(hub.Event{Type: hub.EventPacketObservation, IATA: "YVR", Payload: json.RawMessage(`{"n":1}`)})
+	for _, conn := range []*websocket.Conn{west, named, all} {
+		if got := string(read(conn)["data"]); got != `{"n":1}` {
+			t.Errorf("subscribed client got %q", got)
+		}
+	}
+	for i, conn := range silent {
+		if err := conn.Write(ctx, websocket.MessageText, []byte(`{"v":1,"type":"ping","id":"p"}`)); err != nil {
+			t.Fatal(err)
+		}
+		if msg := read(conn); string(msg["type"]) != `"pong"` {
+			t.Errorf("client %d got %v before its pong", i, msg)
+		}
 	}
 }

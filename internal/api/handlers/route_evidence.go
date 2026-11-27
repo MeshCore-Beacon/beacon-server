@@ -76,7 +76,7 @@ func routeEvidenceQuery(r *http.Request, iata, key string, now time.Time) (api.R
 // getRouteEvidence godoc
 //
 // @Summary Get retained reports matching a full saved route prefix sequence
-// @Description Matches the saved IATA, complete path bytes and hash width. Excludes TRACE and unclassified reports; other widths and search-result subsegments are not included. Byte matches do not prove hop identities or delivery. The route and its historical counter can outlive raw evidence. Cursors retain full timestamp precision and pin route/window scope.
+// @Description Matches the saved IATA, complete path bytes and hash width. Excludes TRACE and unclassified reports; other widths and search-result subsegments are not included. Byte matches do not prove hop identities or delivery. The route and its historical counter can outlive raw evidence. Cursors retain full timestamp precision and pin the route, the window and the path representation the first page matched.
 // @Tags Routes
 // @Produce json
 // @Param iata path string true "Three-character IATA code"
@@ -84,7 +84,7 @@ func routeEvidenceQuery(r *http.Request, iata, key string, now time.Time) (api.R
 // @Param range query string false "Server-anchored duration (default 24h, max 720h); exclusive with since/until/pageCursor"
 // @Param since query int false "Window start epoch ms; provide with until (default last 24h)"
 // @Param until query int false "Exclusive window end epoch ms; maximum span 30d, end may be up to 5 minutes ahead of server time (clock skew tolerance)"
-// @Param pageCursor query string false "Opaque precise cursor from nextPageCursor; window is pinned"
+// @Param pageCursor query string false "Opaque precise cursor from nextPageCursor; route, window and path are pinned"
 // @Param limit query int false "Default 50; positive, capped at 200" minimum(1) maximum(200)
 // @Success 200 {object} api.RouteEvidence
 // @Failure 400 {object} handlers.APIError

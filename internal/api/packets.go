@@ -59,19 +59,22 @@ type PacketPathLength struct {
 
 // PacketObservationDetail is a full observation including radio settings and resolved path.
 type PacketObservationDetail struct {
-	ID                int64            `json:"id"`
-	ObserverID        uuid.UUID        `json:"observerId"`
-	ObserverName      *string          `json:"observerName,omitempty"`
-	IATA              string           `json:"iata"`
-	HeardAt           int64            `json:"heardAt"` // epoch ms
-	PathLength        PacketPathLength `json:"pathLength"`
-	PathBytes         *string          `json:"pathBytes,omitempty"` // hex-encoded accumulated path hashes
-	RSSI              *int16           `json:"rssi,omitempty"`
-	SNR               *float32         `json:"snr,omitempty"`
-	PropagationTimeMs *int32           `json:"propagationTimeMs"` // ms since first observation; 0 for first
-	Radio             *PacketRadio     `json:"radio,omitempty"`
-	SourceBroker      string           `json:"sourceBroker"`
-	ResolvedPath      []ResolvedHop    `json:"resolvedPath"` // per-observation resolved path hashes
+	ID           int64            `json:"id"`
+	ObserverID   uuid.UUID        `json:"observerId"`
+	ObserverName *string          `json:"observerName,omitempty"`
+	IATA         string           `json:"iata"`
+	HeardAt      int64            `json:"heardAt"` // epoch ms
+	PathLength   PacketPathLength `json:"pathLength"`
+	PathBytes    *string          `json:"pathBytes,omitempty"` // hex-encoded accumulated path hashes
+	// WirePathBytes is the path field as it was on air (hex), sent only for a TRACE, whose pathBytes carry the
+	// payload's hop hashes instead: the per-hop SNR bytes, empty when no hop had been reached.
+	WirePathBytes     *string       `json:"wirePathBytes,omitempty"`
+	RSSI              *int16        `json:"rssi,omitempty"`
+	SNR               *float32      `json:"snr,omitempty"`
+	PropagationTimeMs *int32        `json:"propagationTimeMs"` // ms since first observation; 0 for first
+	Radio             *PacketRadio  `json:"radio,omitempty"`
+	SourceBroker      string        `json:"sourceBroker"`
+	ResolvedPath      []ResolvedHop `json:"resolvedPath"` // per-observation resolved path hashes
 	// ResolvedSource/ResolvedDestination are the packet's endpoints, when the payload type
 	// carries one. Prefer the snapshot captured at ingest; legacy observations without a
 	// snapshot use the current node registry. Endpoint matching itself is unchanged:

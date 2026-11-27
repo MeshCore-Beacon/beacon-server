@@ -24,6 +24,25 @@ func newTestClient(t *testing.T) (*Client, *miniredis.Miniredis) {
 	return c, mr
 }
 
+func TestSharedFetchRechecksCacheAfterLateMiss(t *testing.T) {
+	c, _ := newTestClient(t)
+	ctx := context.Background()
+	// A caller saw a miss, then another flight populated the key before it
+	// entered the group. That late caller must reuse the completed result.
+	if err := c.rdb.Set(ctx, "late-miss", `{"revision":7}`, time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	raw, err := fetchShared(ctx, c, "late-miss", time.Hour, func(context.Context) (any, error) {
+		calls++
+		return &api.StatsSeries{Revision: 99}, nil
+	})
+	var got api.StatsSeries
+	if err != nil || json.Unmarshal(raw, &got) != nil || got.Revision != 7 || calls != 0 {
+		t.Fatalf("late miss refetched: revision=%d calls=%d err=%v", got.Revision, calls, err)
+	}
+}
+
 // stubReader is a minimal api.Reader that returns preset values.
 type stubReader struct {
 	iatas []api.IATA
@@ -140,6 +159,14 @@ func (s *stubReader) GetObserverScopes(_ context.Context, _ uuid.UUID) ([]string
 	return nil, nil
 }
 
+func (s *stubReader) GetNodeReadings(_ context.Context, _ uuid.UUID, _, _ time.Time, _ bool) ([]api.NodeReading, bool, int, error) {
+	return nil, false, 0, nil
+}
+
+func (s *stubReader) GetNodePolling(_ context.Context, _ uuid.UUID) (*api.NodePolling, error) {
+	return nil, nil
+}
+
 func (s *stubReader) GetObserverTelemetry(_ context.Context, _ uuid.UUID, _, _ time.Time, _ int64) (*api.ObserverTelemetry, error) {
 	return nil, nil
 }
@@ -180,11 +207,14 @@ func (s *stubReader) ListMessagesAfterID(_ context.Context, _ int64, _ []string,
 	return nil, nil
 }
 
-func (s *stubReader) ListNodes(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+func (s *stubReader) ListNodes(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
 	return api.NodePage{}, nil
 }
 
-func (s *stubReader) ListNodesSorted(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
+func (s *stubReader) ListLatestNodeReadings(context.Context, []string, time.Time) ([]api.NodeLatestReading, error) {
+	return nil, nil
+}
+func (s *stubReader) ListNodesSorted(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
 	return api.NodePage{}, nil
 }
 

@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 )
 
@@ -27,7 +26,7 @@ func TestBroadcastPacketObservation_ObserverKeyOptIn(t *testing.T) {
 
 	broadcast := func() hub.Event {
 		t.Helper()
-		w.broadcastPacketObservation("YVR", 4, packetObservationEvent{}, []api.ResolvedHop{{}}, key, false)
+		w.broadcastPacketObservation("YVR", 4, packetObservationEvent{}, [][]byte{{1}}, nil, key, false)
 		for {
 			select {
 			case evt := <-client.Send:
@@ -73,6 +72,22 @@ func TestBroadcastPacketObservation_ObserverKeyOptIn(t *testing.T) {
 	if string(withKey["observerPublicKey"]) != `"`+key+`"` || string(withKey["resolvedPath"]) != "null" {
 		t.Fatalf("key variant = %v", withKey)
 	}
+	if evt.PayloadResolvedWithKey != nil {
+		t.Fatal("key-only client triggered a combined variant")
+	}
+	w.hub.Configure(keyed, hub.ClientOptions{ResolvePath: true, IncludeObserverKey: true})
+	deadline := time.Now().Add(time.Second)
+	for {
+		_, _, both := w.hub.PacketVariantsWanted()
+		if both {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("combined opt-in was not applied")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	evt = broadcast()
 	both := observation(evt.PayloadResolvedWithKey)
 	if string(both["observerPublicKey"]) != `"`+key+`"` || string(both["resolvedPath"]) == "null" {
 		t.Fatalf("resolved key variant = %v", both)

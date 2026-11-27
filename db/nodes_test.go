@@ -60,8 +60,18 @@ func TestUpsertNode_ComputesClockDrift(t *testing.T) {
 			captured = p
 			return sqlc.Node{ID: nodeID}, nil
 		})
+	var history sqlc.RecordClockDriftParams
+	mock.EXPECT().RecordClockDrift(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, p sqlc.RecordClockDriftParams) error {
+		history = p
+		return nil
+	})
 
 	store := &Store{q: mock}
+	defer func() {
+		if history.NodeID != nodeID || history.DriftSeconds > -595 || history.DriftSeconds < -605 {
+			t.Errorf("drift history not recorded for the node: %+v", history)
+		}
+	}()
 	_, err := store.UpsertNode(context.Background(), ingest.UpsertNodeParams{
 		PublicKey:       []byte{0x01},
 		NodeType:        2, // repeater
@@ -199,7 +209,7 @@ func TestListNodes_Pagination(t *testing.T) {
 		Return(rows, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, []string{"YVR"}, nil, nil, nil, "", "", "", 0, nil, 2, false)
+	page, err := store.ListNodes(context.Background(), 0, []string{"YVR"}, nil, nil, nil, nil, "", "", "", 0, nil, 2, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -232,7 +242,7 @@ func TestListNodes_IATAsUnmarshal(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -261,7 +271,7 @@ func TestListNodes_Stale(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock, staleThreshold: 24 * time.Hour}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -302,7 +312,7 @@ func TestListNodes_RadioStringFormatting(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -647,7 +657,7 @@ func TestListNodes_IncludeNeighbors_PassesFlagAndMapsIDs(t *testing.T) {
 		ListNodes(gomock.Any(), gomock.Eq(sqlc.ListNodesParams{
 			Column1: int16(0), Column2: nil, Column3: "any", Column4: "any",
 			Column5: nil, Column6: "", Column7: pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true},
-			Limit: 11, Column9: "", Column12: uuid.Nil, Column10: true,
+			Limit: 11, Column9: "", Column12: uuid.Nil, Column10: true, Column13: "any",
 		})).
 		Return([]sqlc.ListNodesRow{
 			{
@@ -658,7 +668,7 @@ func TestListNodes_IncludeNeighbors_PassesFlagAndMapsIDs(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 10, true)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, nil, "", "", "", 0, nil, 10, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -677,14 +687,14 @@ func TestListNodes_ExcludeNeighbors_LeavesIDsNil(t *testing.T) {
 		ListNodes(gomock.Any(), gomock.Eq(sqlc.ListNodesParams{
 			Column1: int16(0), Column2: nil, Column3: "any", Column4: "any",
 			Column5: nil, Column6: "", Column7: pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true},
-			Limit: 11, Column9: "", Column12: uuid.Nil, Column10: false,
+			Limit: 11, Column9: "", Column12: uuid.Nil, Column10: false, Column13: "any",
 		})).
 		Return([]sqlc.ListNodesRow{
 			{ID: nodeID, PublicKey: []byte{0x01}, NeighborIds: nil},
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -734,12 +744,12 @@ func TestListNodes_CursorParams(t *testing.T) {
 				ListNodes(gomock.Any(), gomock.Eq(sqlc.ListNodesParams{
 					Column1: int16(2), Column2: []string{"YVR"}, Column3: "true", Column4: "any",
 					Column5: []byte{0x01}, Column6: "n", Column7: tc.ts,
-					Limit: 6, Column9: "#test", Column10: true, Column11: "ab", Column12: tc.id,
+					Limit: 6, Column9: "#test", Column10: true, Column11: "ab", Column12: tc.id, Column13: "true",
 				})).
 				Return(nil, nil)
 			yes := true
 			store := &Store{q: mock}
-			page, err := store.ListNodes(context.Background(), 2, []string{"YVR"}, &yes, nil, []byte{0x01}, "ab", "n", "#test", tc.cursor, tc.pc, 5, true)
+			page, err := store.ListNodes(context.Background(), 2, []string{"YVR"}, &yes, nil, &yes, []byte{0x01}, "ab", "n", "#test", tc.cursor, tc.pc, 5, true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -764,7 +774,7 @@ func TestListNodes_NextPageCursor(t *testing.T) {
 		mock := mockdb.NewMockQuerier(ctrl)
 		mock.EXPECT().ListNodes(gomock.Any(), gomock.Any()).Return(rows, nil)
 		store := &Store{q: mock}
-		page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, limit, false)
+		page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, nil, "", "", "", 0, nil, limit, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -793,7 +803,7 @@ func TestNodeListsCarryDefaultScope(t *testing.T) {
 	mock.EXPECT().ListNodes(gomock.Any(), gomock.Any()).Return([]sqlc.ListNodesRow{row, {ID: uuid.New(), PublicKey: []byte{3}}}, nil)
 	mock.EXPECT().ListNodesSorted(gomock.Any(), gomock.Any()).Return([]sqlc.ListNodesSortedRow{sorted}, nil)
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 50, false)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, nil, "", "", "", 0, nil, 50, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -803,7 +813,7 @@ func TestNodeListsCarryDefaultScope(t *testing.T) {
 	if page.Items[1].DefaultScope != nil {
 		t.Fatalf("a node without a scope got %q", *page.Items[1].DefaultScope)
 	}
-	sortedPage, err := store.ListNodesSorted(context.Background(), 0, nil, nil, nil, nil, "", "", "", api.NodeSort{By: api.NodeSortName}, nil, 50, false)
+	sortedPage, err := store.ListNodesSorted(context.Background(), 0, nil, nil, nil, nil, nil, "", "", "", api.NodeSort{By: api.NodeSortName}, nil, 50, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -824,14 +834,14 @@ func TestNodeListsCarryLastSeen(t *testing.T) {
 	mock.EXPECT().GetNodeByID(gomock.Any(), id).Return(sqlc.GetNodeByIDRow{ID: id, PublicKey: []byte{3}, LastSeen: seen}, nil)
 	mock.EXPECT().GetNodeNeighbors(gomock.Any(), id).Return([]sqlc.GetNodeNeighborsRow{}, nil)
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 50, false)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, nil, "", "", "", 0, nil, 50, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := page.Items[0].LastSeen; got != ms {
 		t.Fatalf("list lastSeen %d, want %d", got, ms)
 	}
-	sortedPage, err := store.ListNodesSorted(context.Background(), 0, nil, nil, nil, nil, "", "", "", api.NodeSort{By: api.NodeSortName}, nil, 50, false)
+	sortedPage, err := store.ListNodesSorted(context.Background(), 0, nil, nil, nil, nil, nil, "", "", "", api.NodeSort{By: api.NodeSortName}, nil, 50, false)
 	if err != nil {
 		t.Fatal(err)
 	}

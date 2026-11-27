@@ -48,6 +48,12 @@ func (s *Store) UpsertNode(ctx context.Context, n ingest.UpsertNodeParams, radio
 	if err != nil {
 		return uuid.Nil, err
 	}
+	if driftSeconds != nil {
+		// History for the clock alert; losing one entry is not worth failing the advert.
+		if err := s.q.RecordClockDrift(ctx, sqlc.RecordClockDriftParams{NodeID: row.ID, DriftSeconds: *driftSeconds}); err != nil {
+			slog.Warn("clock drift history not stored", "component", "db", "err", err)
+		}
+	}
 	return row.ID, nil
 }
 
@@ -108,7 +114,7 @@ func uuidKeysetCursor(cursor int64, at *time.Time, id uuid.UUID) (pgtype.Timesta
 }
 
 // listNodesParams builds the statement's arguments for one ListNodes request.
-func listNodesParams(nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) sqlc.ListNodesParams {
+func listNodesParams(nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) sqlc.ListNodesParams {
 	var (
 		at *time.Time
 		id uuid.UUID
@@ -130,11 +136,12 @@ func listNodesParams(nodeType int16, iatas []string, supportsMultibytePaths, sup
 		Column10: includeNeighbors,
 		Column11: pubkeyPrefix,
 		Column12: cursorID,
+		Column13: tristate(poller),
 	}
 }
 
-func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
-	rows, err := s.q.ListNodes(ctx, listNodesParams(nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors))
+func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+	rows, err := s.q.ListNodes(ctx, listNodesParams(nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, poller, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors))
 	if err != nil {
 		return api.NodePage{}, err
 	}
@@ -157,7 +164,7 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 	return page, nil
 }
 
-func (s *Store) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+func (s *Store) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
 	params := sqlc.ListNodesSortedParams{
 		IncludeNeighbors: includeNeighbors,
 		Descending:       sort.Descending,
@@ -166,6 +173,7 @@ func (s *Store) ListNodesSorted(ctx context.Context, nodeType int16, iatas []str
 		Iatas:            iatas,
 		MultibytePaths:   tristate(supportsMultibytePaths),
 		MultibyteTraces:  tristate(supportsMultibyteTraces),
+		Poller:           tristate(poller),
 		Pubkey:           pubkey,
 		Name:             name,
 		Scope:            scope,
@@ -190,7 +198,7 @@ func (s *Store) ListNodesSorted(ctx context.Context, nodeType int16, iatas []str
 		items = append(items, s.nodeSummary(sqlc.ListNodesRow{
 			ID: v.ID, PublicKey: v.PublicKey, NodeType: v.NodeType, Name: v.Name, Latitude: v.Latitude,
 			Longitude: v.Longitude, LastSeen: v.LastSeen, RadioFreqMhz: v.RadioFreqMhz, RadioSf: v.RadioSf,
-			RadioBwKhz: v.RadioBwKhz, DefaultScopeName: v.DefaultScopeName, Iatas: v.Iatas, IsObserver: v.IsObserver,
+			RadioBwKhz: v.RadioBwKhz, DefaultScopeName: v.DefaultScopeName, Iatas: v.Iatas, IsObserver: v.IsObserver, IsPoller: v.IsPoller,
 			ObserverID: v.ObserverID, KnownNeighborCount: v.KnownNeighborCount, NeighborIds: v.NeighborIds,
 		}))
 	}
@@ -214,6 +222,7 @@ func (s *Store) nodeSummary(v sqlc.ListNodesRow) api.NodeSummary {
 		Latitude:           v.Latitude,
 		Longitude:          v.Longitude,
 		IsObserver:         v.IsObserver,
+		IsPoller:           v.IsPoller,
 		ObserverID:         nullableUUID(v.ObserverID),
 		DefaultScope:       v.DefaultScopeName,
 		KnownNeighborCount: v.KnownNeighborCount,
@@ -249,6 +258,7 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 			Latitude:           row.Latitude,
 			Longitude:          row.Longitude,
 			IsObserver:         row.IsObserver,
+			IsPoller:           row.IsPoller,
 			ObserverID:         nullableUUID(row.ObserverID),
 			DefaultScope:       row.DefaultScopeName,
 			KnownNeighborCount: row.KnownNeighborCount,
@@ -317,14 +327,22 @@ func abs(n int64) int64 {
 // 30 minutes either side of the server time a packet is stored at, and the rest allows for late repeats.
 const nodeActivityPacketLead = 6 * time.Hour
 
+// nodeActivityLateSlack is how far a hearing's heard_at can run ahead of the server time its packet's last_heard_at
+// was set from: an older packet heard in the raw tail was last heard no earlier than the tail's start less this.
+const nodeActivityLateSlack = 30 * time.Minute
+
 // GetNodeActivity returns hourly heard-activity for the packets a node originated: the hourly rollup plus raw
 // rows for the unrolled tail. Range is left empty for the handler to fill.
 func (s *Store) GetNodeActivity(ctx context.Context, nodeID uuid.UUID, window time.Duration) (*api.NodeActivity, error) {
+	return s.nodeActivityAt(ctx, nodeID, window, time.Now().UTC())
+}
+
+// nodeActivityAt is GetNodeActivity as of now, which tests hold still.
+func (s *Store) nodeActivityAt(ctx context.Context, nodeID uuid.UUID, window time.Duration, now time.Time) (*api.NodeActivity, error) {
 	pubkey, err := s.q.GetNodePublicKey(ctx, nodeID)
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC()
 	until := now
 	since := until.Add(-window)
 	if !since.Equal(since.Truncate(time.Hour)) {
@@ -355,6 +373,7 @@ func (s *Store) GetNodeActivity(ctx context.Context, nodeID uuid.UUID, window ti
 		Until:        ts(until),
 		TailStart:    ts(tailStart),
 		PacketFrom:   ts(rawFrom.Add(-nodeActivityPacketLead)),
+		LateFrom:     ts(rawFrom.Add(-nodeActivityLateSlack)),
 		PacketUntil:  ts(until.Add(30 * time.Minute)),
 	})
 	if err != nil {

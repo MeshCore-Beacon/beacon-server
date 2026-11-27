@@ -56,8 +56,8 @@ type InsertObservationParams struct {
 	HashSize          uint8
 	HopCount          uint8
 	PathBytes         []byte
-	RSSI              int16
-	SNR               float32
+	RSSI              *int16
+	SNR               *float32
 	PropagationTimeMs int32
 	RadioFreqMHz      float32
 	SpreadFactor      int16
@@ -97,13 +97,13 @@ type packetObservationEvent struct {
 		ObserverID   string `json:"observerId"`
 		ObserverName string `json:"observerName"`
 		// Only set for clients that sent includeObserverKey.
-		ObserverPublicKey string  `json:"observerPublicKey,omitempty"`
-		IATA              string  `json:"iata"`
-		HeardAt           int64   `json:"heardAt"`
-		RSSI              int16   `json:"rssi"`
-		SNR               float32 `json:"snr"`
-		SourceBroker      string  `json:"sourceBroker"`
-		PathBytes         string  `json:"pathBytes"`
+		ObserverPublicKey string   `json:"observerPublicKey,omitempty"`
+		IATA              string   `json:"iata"`
+		HeardAt           int64    `json:"heardAt"`
+		RSSI              *int16   `json:"rssi,omitempty"`
+		SNR               *float32 `json:"snr,omitempty"`
+		SourceBroker      string   `json:"sourceBroker"`
+		PathBytes         string   `json:"pathBytes"`
 		PathLength        struct {
 			Raw      string `json:"raw"`
 			HashSize uint8  `json:"hashSize"`
@@ -312,6 +312,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		w.log.Warn(fmt.Sprintf("malformed packet envelope from %s/%s", iata, pubkeyHex))
 		return
 	}
+	rxRSSI, rxSNR := observationSignal(envelope.RSSI, envelope.SNR)
 	hexBytes, err := hex.DecodeString(strings.ReplaceAll(envelope.Raw, " ", ""))
 	if err != nil {
 		w.log.Warn(fmt.Sprintf("invalid hex from %s/%s", iata, pubkeyHex), "error", err)
@@ -676,8 +677,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 						responderNodeID, rErr := w.db.GetNodeByPubkey(ctx, resp.PubKey)
 						// don't insert our own node as a neighbor
 						if oErr == nil && rErr == nil && observerNodeID != responderNodeID {
-							rxSNR := float32(parseNumber(envelope.SNR))
-							if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, responderNodeID, iata, &rxSNR, nil); err != nil {
+							if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, responderNodeID, iata, rxSNR, nil); err != nil {
 								w.log.Error("failed to upsert observer-discover neighbor", "error", err)
 							}
 						}
@@ -772,8 +772,8 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		HashSize:          packet.PathHashSize(),
 		HopCount:          packet.PathHashCount(),
 		PathBytes:         packet.Path,
-		RSSI:              int16(parseNumber(envelope.RSSI)),
-		SNR:               float32(parseNumber(envelope.SNR)),
+		RSSI:              rxRSSI,
+		SNR:               rxSNR,
 		PropagationTimeMs: 0, // TODO: figure out how to calculate this
 		RadioFreqMHz:      radio.FreqMHz,
 		SpreadFactor:      radio.SF,
@@ -831,8 +831,11 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	// byte per hop instead, so for TRACE we resolve against the trace payload's own
 	// PathHashes (the path being probed) rather than treating SNR bytes as hashes.
 	hashes := packet.PathHashes()
+	routeHashes := hashes
 	if packet.PayloadType() == meshcore.PayloadTypeTrace {
 		hashes = traceRawHashes
+		// Only the hops that added an SNR byte carried the packet; the rest are still just asked for.
+		routeHashes = hashes[:min(len(hashes), len(packet.Path))]
 	}
 	resolved, err := w.db.ResolvePathHashes(ctx, iata, hashes)
 	if err != nil {
@@ -844,11 +847,11 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			resolvedIDs = append(resolvedIDs, e.NodeID)
 		}
 	}
-	if len(hashes) > 0 && resolved != nil {
+	if len(routeHashes) > 0 && resolved != nil {
 		allHigh := true
-		nodeIDs := make([]uuid.UUID, 0, len(hashes))
-		hashPrefixes := make([][]byte, 0, len(hashes))
-		for _, hash := range hashes {
+		nodeIDs := make([]uuid.UUID, 0, len(routeHashes))
+		hashPrefixes := make([][]byte, 0, len(routeHashes))
+		for _, hash := range routeHashes {
 			key := hex.EncodeToString(hash)
 			entries := resolved[key]
 			if len(entries) != 1 {
@@ -868,7 +871,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 
 	if inserted || repeat {
 		if inserted {
-			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)), siteRecorded, !isNew)
+			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, rxSNR, siteRecorded, !isNew)
 		}
 		// Resolve after advert updates; suppressed copies need no endpoint lookup.
 		var resolvedSource, resolvedDestination *api.ResolvedHop
@@ -920,10 +923,9 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		if matchedScope != nil {
 			evt.Packet.Scope = matchedScope
 		}
-		resolvedPath := api.BuildResolvedPath(hashes, resolved)
 		evt.Observation.ResolvedSource = resolvedSource
 		evt.Observation.ResolvedDestination = resolvedDestination
-		w.broadcastPacketObservation(iata, packet.PayloadType(), evt, resolvedPath, hex.EncodeToString(pubkeyBytes), repeat)
+		w.broadcastPacketObservation(iata, packet.PayloadType(), evt, hashes, resolved, hex.EncodeToString(pubkeyBytes), repeat)
 	}
 }
 

@@ -33,7 +33,7 @@ func TestGetStatsSeries(t *testing.T) {
 		{"global", window, 0, since, nil, nil, 200},
 		{"IATAs", window + "&iatas=yvr,yyj", 0, since, []string{"YVR", "YYJ"}, nil, 200},
 		{"region", window + "&region=west", 0, since, []string{"YVR"}, nil, 200},
-		{"empty region matches nothing", window + "&region=empty", 0, since, []string{""}, nil, 200},
+		{"empty region matches nothing", window + "&region=empty", 0, since, []string{emptyRegionIATA}, nil, 200},
 		{"missing region", window + "&region=missing", 0, since, nil, nil, 400},
 		{"missing until", fmt.Sprintf("since=%d", since.UnixMilli()), 0, since, nil, nil, 400},
 		{"window over retention", window, 24 * time.Hour, since, nil, nil, 400},

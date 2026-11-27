@@ -36,6 +36,36 @@ type Options struct {
 	AdminRoutes map[string]http.Handler
 	// Guards guards the public API group; nil runs it unguarded and reports no guards.
 	Guards *guards.Guard
+	// GuestPolling answers the firmware policy and owners routes. Leave it an untyped nil when
+	// polling is not wired: a nil *polling.Service stored here is not == nil and would be called.
+	GuestPolling handlers.GuestPolling
+	// PollingEnabled is reported as features.polling in /info.
+	PollingEnabled bool
+	// TemperatureUnit (c or f) and DistanceUnit (metric or imperial) are reported in /info display; empty reads as c and metric.
+	TemperatureUnit, DistanceUnit string
+	// AtlasLimit is the most cards one Atlas holds, reported in /info limits; 0 reads as 20.
+	AtlasLimit int
+	// AccountsMode is reported as features.accounts: "local" or anything else for off.
+	AccountsMode string
+	// RegistrationOpen is reported as features.registration while accounts are local.
+	RegistrationOpen bool
+	// PortalURL is reported as features.portalUrl while accounts are in portal mode.
+	PortalURL string
+	// AlertEmail and AlertPush are the alert channels this server offers, reported as features.alerts and
+	// features.alertChannels.
+	AlertEmail, AlertPush bool
+	// PushServer and PushID are reported as features.push while AlertPush is on; PushSecret answers the push server's
+	// domain check at /.well-known/beacon-push.
+	PushServer, PushID, PushSecret string
+	// Accounts serves the sign-in and profile routes. Leave it an untyped nil when accounts are off: a nil
+	// *users.Service stored here is not == nil and would be called.
+	Accounts handlers.AccountsService
+	// AuthOptions configures those routes; with Enabled false they answer 404 accounts_disabled.
+	AuthOptions handlers.AuthOptions
+	// TelemetryRequests is reported as features.telemetryRequests in /info.
+	TelemetryRequests bool
+	// MeMounts adds routes under /me (Atlas, telemetry requests); they need accounts on.
+	MeMounts []handlers.MeMount
 	// APIPlanLayout is reported in the admin config's guards view.
 	APIPlanLayout string
 }

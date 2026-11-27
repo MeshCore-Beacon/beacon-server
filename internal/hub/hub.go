@@ -22,6 +22,8 @@ import (
 	"slices"
 	"sync/atomic"
 	"time"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 )
 
 // EventType identifies the kind of server-push event. These match the
@@ -160,13 +162,14 @@ func scopeMatches(s Scope, e Event) bool {
 
 // Hub is the central event broker.
 type Hub struct {
-	subscribe   chan subscribeMsg
-	unsubscribe chan unsubscribeMsg
-	remove      chan *Client
-	broadcast   chan Event
+	control    chan controlMsg
+	broadcast  chan Event
+	gapNotify  chan struct{}
+	pendingGap atomic.Int64
 
-	// observerKeyClients counts registered clients with IncludeObserverKey set.
-	observerKeyClients atomic.Int64
+	// variantClients is owned by Run; variantDemand publishes one coherent snapshot to ingest.
+	variantClients [4]int
+	variantDemand  atomic.Uint32
 	// repeatClients counts registered clients with IncludeRepeats set.
 	repeatClients atomic.Int64
 	// repeatDrops counts repeats refused because the broadcast channel was busy.
@@ -175,37 +178,30 @@ type Hub struct {
 	sent            *sentPaths
 }
 
-// subscribeMsg carries a client registration, a scope subscription, or a
-// configure request — all three go through this single
-// channel, not separate ones, specifically so that Go's same-channel FIFO
-// guarantee orders them relative to NewClient's registration message. A
-// separate "configure" channel raced against registration: select() has no
-// cross-channel ordering guarantee, so a configure sent immediately after
-// NewClient could be (and empirically was, ~50% of the time) processed by
-// Run() before the registration message, silently no-oping since the client
-// wasn't in the clients map yet.
-type subscribeMsg struct {
+// controlMsg keeps every client operation on one FIFO queue. Separate channels
+// let removal overtake registration, or unsubscribe overtake subscribe, because
+// select has no cross-channel ordering guarantee.
+type controlMsg struct {
 	client         *Client
 	scope          Scope
 	subscriptionID string
 
-	isConfigure bool
-	options     ClientOptions
+	isConfigure   bool
+	isUnsubscribe bool
+	isRemove      bool
+	options       ClientOptions
 }
 
-type unsubscribeMsg struct {
-	client         *Client
-	subscriptionID string
-}
+// gapNoticeInterval is the least time between two notices of events lost to a full broadcast queue.
+var gapNoticeInterval = 5 * time.Second
 
 // New creates a Hub. Call Run() in a goroutine before using it.
 func New() *Hub {
 	return &Hub{
-		subscribe:   make(chan subscribeMsg, 64),
-		unsubscribe: make(chan unsubscribeMsg, 64),
-		remove:      make(chan *Client, 64),
-		broadcast:   make(chan Event, 512),
-		sent:        newSentPaths(sentPathsTTL, sentPathsMax),
+		control:   make(chan controlMsg, 64),
+		broadcast: make(chan Event, 512),
+		gapNotify: make(chan struct{}, 1),
+		sent:      newSentPaths(sentPathsTTL, sentPathsMax),
 	}
 }
 
@@ -219,32 +215,71 @@ func (h *Hub) NewClient() *Client {
 	}
 	// We don't add it to the map here; we send it through the channel so
 	// Run() is the only goroutine that touches the client map.
-	h.subscribe <- subscribeMsg{client: c}
+	h.control <- controlMsg{client: c}
 	return c
 }
 
 // AddScope appends a subscription scope to a client. Called by the WS handler
 // when it receives a "subscribe" message from the client.
 func (h *Hub) AddScope(c *Client, id string, s Scope) {
-	h.subscribe <- subscribeMsg{client: c, scope: s, subscriptionID: id}
+	h.control <- controlMsg{client: c, scope: s, subscriptionID: id}
 }
 
 // RemoveScope removes a single subscription by ID. Called by the WS handler
 // when it receives an "unsubscribe" message from the client. Silently ignored
 // if the ID is not found.
 func (h *Hub) RemoveScope(c *Client, id string) {
-	h.unsubscribe <- unsubscribeMsg{client: c, subscriptionID: id}
+	h.control <- controlMsg{client: c, subscriptionID: id, isUnsubscribe: true}
 }
 
 // Configure replaces a client's connection-wide options. Unlike scopes, it is
 // not additive.
 func (h *Hub) Configure(c *Client, opts ClientOptions) {
-	h.subscribe <- subscribeMsg{client: c, isConfigure: true, options: opts}
+	h.control <- controlMsg{client: c, isConfigure: true, options: opts}
 }
 
 // ObserverKeyWanted lets ingest skip the key variants when nobody wants them.
 func (h *Hub) ObserverKeyWanted() bool {
-	return h.observerKeyClients.Load() > 0
+	_, key, both := h.PacketVariantsWanted()
+	return key || both
+}
+
+// PacketVariantsWanted reports demand for the resolved-only, key-only and combined
+// payloads. Separate resolved and keyed clients do not imply demand for the combination.
+func (h *Hub) PacketVariantsWanted() (resolved, key, both bool) {
+	mask := h.variantDemand.Load()
+	return mask&(1<<1) != 0, mask&(1<<2) != 0, mask&(1<<3) != 0
+}
+
+func packetVariant(resolvePath, observerKey bool) int {
+	i := 0
+	if resolvePath {
+		i |= 1
+	}
+	if observerKey {
+		i |= 2
+	}
+	return i
+}
+
+// replacePacketVariant runs only inside Run. -1 denotes an absent client.
+func (h *Hub) replacePacketVariant(old, next int) {
+	if old == next {
+		return
+	}
+	if old >= 0 {
+		h.variantClients[old]--
+	}
+	if next >= 0 {
+		h.variantClients[next]++
+	}
+	var mask uint32
+	for i := 1; i < len(h.variantClients); i++ {
+		if h.variantClients[i] > 0 {
+			mask |= 1 << i
+		}
+	}
+	h.variantDemand.Store(mask)
 }
 
 // RepeatsWanted lets ingest skip broadcasting repeats when nobody wants them.
@@ -261,7 +296,7 @@ func (h *Hub) MarkSent(packetHash, observerID, path []byte) bool {
 // Remove deregisters a client and closes its Send channel.
 // Safe to call from any goroutine (e.g. the WS handler's defer).
 func (h *Hub) Remove(c *Client) {
-	h.remove <- c
+	h.control <- controlMsg{client: c, isRemove: true}
 }
 
 // Broadcast enqueues an event for fan-out. Safe to call from any goroutine.
@@ -270,6 +305,12 @@ func (h *Hub) Broadcast(e Event) {
 	case h.broadcast <- e:
 	default:
 		slog.Warn("hub: broadcast channel full, dropping event", "component", "hub")
+		metrics.StreamDropped.WithLabelValues("global").Inc()
+		h.pendingGap.Add(1)
+		select {
+		case h.gapNotify <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -290,6 +331,7 @@ func (h *Hub) BroadcastRepeat(e Event) {
 
 // dropRepeat counts a dropped repeat and logs the running total at most once a minute.
 func (h *Hub) dropRepeat() {
+	metrics.StreamDropped.WithLabelValues("repeat").Inc()
 	total := h.repeatDrops.Add(1)
 	now := time.Now().UnixNano()
 	last := h.repeatDropLogAt.Load()
@@ -309,24 +351,55 @@ func (h *Hub) Run() {
 	// broadcast — fine at the scale Beacon targets.
 	clients := make(map[*Client]struct{})
 
+	var lastGap time.Time
+	var gapDue <-chan time.Time
+	// notifyGap tells every subscribed client that the full broadcast queue lost events.
+	notifyGap := func() {
+		dropped := int(h.pendingGap.Swap(0))
+		if dropped == 0 {
+			return
+		}
+		lastGap = time.Now()
+		for c := range clients {
+			if len(c.subscriptions) == 0 {
+				continue
+			}
+			select {
+			case c.laggedCH <- LaggedNotification{DroppedCount: dropped}:
+			default:
+			}
+		}
+	}
 	for {
 		select {
 
-		case msg := <-h.subscribe:
+		case msg := <-h.control:
 			switch {
+			case msg.isRemove:
+				c := msg.client
+				if _, ok := clients[c]; ok {
+					delete(clients, c)
+					h.replacePacketVariant(packetVariant(c.ResolvePath, c.IncludeObserverKey), -1)
+					if c.IncludeRepeats {
+						h.repeatClients.Add(-1)
+					}
+					close(c.Send)
+					close(c.laggedCH)
+				}
+			case msg.isUnsubscribe:
+				if _, ok := clients[msg.client]; ok {
+					delete(msg.client.subscriptions, msg.subscriptionID)
+				}
 			case msg.subscriptionID == "" && !msg.isConfigure:
 				// Registration with no scope yet (NewClient path).
-				clients[msg.client] = struct{}{}
+				if _, exists := clients[msg.client]; !exists {
+					clients[msg.client] = struct{}{}
+					h.replacePacketVariant(-1, packetVariant(msg.client.ResolvePath, msg.client.IncludeObserverKey))
+				}
 			case msg.isConfigure:
 				// Configure path — client must already be registered.
 				if _, ok := clients[msg.client]; ok {
-					if msg.client.IncludeObserverKey != msg.options.IncludeObserverKey {
-						if msg.options.IncludeObserverKey {
-							h.observerKeyClients.Add(1)
-						} else {
-							h.observerKeyClients.Add(-1)
-						}
-					}
+					h.replacePacketVariant(packetVariant(msg.client.ResolvePath, msg.client.IncludeObserverKey), packetVariant(msg.options.ResolvePath, msg.options.IncludeObserverKey))
 					if msg.client.IncludeRepeats != msg.options.IncludeRepeats {
 						if msg.options.IncludeRepeats {
 							h.repeatClients.Add(1)
@@ -345,23 +418,21 @@ func (h *Hub) Run() {
 				}
 			}
 
-		case msg := <-h.unsubscribe:
-			if _, ok := clients[msg.client]; ok {
-				delete(msg.client.subscriptions, msg.subscriptionID)
+		case <-h.gapNotify:
+			// Each notice makes clients refetch, so a burst of drops gets one now and one more once the interval is up.
+			if wait := gapNoticeInterval - time.Since(lastGap); wait > 0 {
+				if gapDue == nil {
+					gapDue = time.After(wait)
+				}
+				continue
 			}
+			// an armed timer would send a second notice right behind this one
+			gapDue = nil
+			notifyGap()
 
-		case c := <-h.remove:
-			if _, ok := clients[c]; ok {
-				delete(clients, c)
-				if c.IncludeObserverKey {
-					h.observerKeyClients.Add(-1)
-				}
-				if c.IncludeRepeats {
-					h.repeatClients.Add(-1)
-				}
-				close(c.Send)
-				close(c.laggedCH)
-			}
+		case <-gapDue:
+			gapDue = nil
+			notifyGap()
 
 		case evt := <-h.broadcast:
 			for c := range clients {
@@ -375,20 +446,25 @@ func (h *Hub) Run() {
 				default:
 					// Evict the oldest so the newest still goes out.
 					dropped := 1
+					lost := 0
 					select {
 					case <-c.Send:
+						lost++
 					default:
 					}
 					select {
 					case c.Send <- outEvt:
 					default:
 						dropped++
+						lost++
 					}
 					select {
 					case c.laggedCH <- LaggedNotification{DroppedCount: dropped}:
 					default:
 						// laggedCh itself full; write pump will catch up on next drain
 					}
+					// the reader may have drained the buffer in between, and then nothing was lost
+					metrics.StreamDropped.WithLabelValues("client").Add(float64(lost))
 					slog.Warn(fmt.Sprintf("hub: client send buffer full, dropped event type=%s", evt.Type), "component", "hub")
 				}
 			}

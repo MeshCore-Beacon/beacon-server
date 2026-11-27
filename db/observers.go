@@ -410,7 +410,7 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 	}
 	for t, b := range counted.Buckets {
 		add(t, activitySums{observations: b.Observations, airtimeSum: b.AirtimeSum, airtimeN: b.AirtimeN,
-			snrSum: b.SNRSum, snrMin: b.SNRMin, snrN: b.SignalN, rssiSum: b.RSSISum, rssiN: b.SignalN})
+			snrSum: b.SNRSum, snrMin: b.SNRMin, snrN: b.SNRN, rssiSum: b.RSSISum, rssiN: b.RSSIN})
 		for payloadType, n := range b.Types {
 			types[payloadType] += n
 		}
@@ -522,6 +522,7 @@ func AdvertPage(rows []sqlc.ListObserverAdvertsRow, limit int32) api.Page[api.Ad
 	}
 	items := make([]api.AdvertObservation, 0, len(rows))
 	for _, v := range rows {
+		rssi, snr := storedSignal(v.Rssi, v.Snr)
 		items = append(items, api.AdvertObservation{
 			PacketObservationSummary: api.PacketObservationSummary{
 				ID:              v.ID,
@@ -530,8 +531,8 @@ func AdvertPage(rows []sqlc.ListObserverAdvertsRow, limit int32) api.Page[api.Ad
 				PayloadTypeName: api.PayloadTypeName(v.PayloadType),
 				IATA:            v.Iata,
 				HeardAt:         v.HeardAt.Time.UnixMilli(),
-				RSSI:            v.Rssi,
-				SNR:             v.Snr,
+				RSSI:            rssi,
+				SNR:             snr,
 				HopCount:        &v.HopCount,
 			},
 			NodeName:      v.NodeName,

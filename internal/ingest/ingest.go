@@ -43,7 +43,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -156,6 +155,8 @@ type DB interface {
 
 	// IsObserverByPubkey returns true if the given public key belongs to a known observer.
 	IsObserverByPubkey(ctx context.Context, pubkey []byte) bool
+	// IsPollerByPubkey returns true if the given public key has a polling claim.
+	IsPollerByPubkey(ctx context.Context, pubkey []byte) bool
 
 	// GetObserverScopes returns the list of scope names associated with the given observer.
 	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)
@@ -236,6 +237,7 @@ type Worker struct {
 	capabilities     capabilityCache
 	onNodeUpsert     func(ctx context.Context, nodeID uuid.UUID)
 	onObserverUpsert func(ctx context.Context, observerID uuid.UUID)
+	polling          PollingSink // nil when repeater polling is off
 }
 
 // New creates an ingest Worker. Call Start() to connect and begin processing.
@@ -412,6 +414,7 @@ func (w *Worker) handleMessageContext(parent context.Context, msg mqtt.Message) 
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 
+	// "internal" is intentionally not handled (Role 2 access).
 	switch subtopic {
 	case "packets":
 		w.handlePacket(ctx, iata, pubkeyHex, msg.Payload())
@@ -419,7 +422,14 @@ func (w *Worker) handleMessageContext(parent context.Context, msg mqtt.Message) 
 		w.handleStatus(ctx, pubkeyHex, msg.Payload())
 	case "neighbors":
 		w.handleNeighbors(ctx, iata, pubkeyHex, msg.Payload())
-		// "internal" is intentionally not handled (Role 2 access)
+	case "polling":
+		if w.polling != nil {
+			w.polling.HandleClaim(ctx, pubkeyHex, msg.Payload())
+		}
+	case "telemetry", "battery":
+		if w.polling != nil {
+			w.polling.HandleReading(ctx, pubkeyHex, msg.Payload())
+		}
 	}
 }
 
@@ -438,15 +448,12 @@ func (w *Worker) broadcast(eventType hub.EventType, iata string, payloadType uin
 	})
 }
 
-// broadcastPacketObservation marshals evt once as-is (the default
-// payload every packetObservation subscriber gets) and once with
-// resolvedPath populated (delivered only to connections that opted in via
-// the "configure" WS message; see hub.Client.ResolvePath). resolvedPath is
-// passed in rather than computed here because the caller already has the
-// path-hash resolution results in hand from other per-packet work (known
-// route detection, capability detection) — this adds no extra DB calls.
-// Repeats go through the hub's drop-first path.
-func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt packetObservationEvent, resolvedPath []api.ResolvedHop, observerKey string, repeat bool) {
+// broadcastPacketObservation always keeps a base payload for safe fallback, but
+// shapes and marshals optional variants only when clients request them. The caller
+// still resolves hashes for route/capability detection; this adds no DB calls.
+// A configure after this snapshot may receive the base fields for an in-flight
+// event, never fields that the connection didn't request. Repeats stay drop-first.
+func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt packetObservationEvent, hashes [][]byte, resolved map[string][]api.ResolvedPathEntry, observerKey string, repeat bool) {
 	base, err := json.Marshal(evt)
 	if err != nil {
 		w.log.Error("failed to marshal packetObservation event", "error", err)
@@ -460,18 +467,24 @@ func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt 
 		RouteType:   evt.Packet.RouteType,
 		ObserverID:  evt.Observation.ObserverID,
 	}
-	evt.Observation.ResolvedPath = resolvedPath
-	if out.PayloadResolved, err = json.Marshal(evt); err != nil {
-		w.log.Error("failed to marshal packetObservation event (resolved variant)", "error", err)
-		out.PayloadResolved = nil
-	}
-	if w.hub.ObserverKeyWanted() {
-		evt.Observation.ObserverPublicKey = observerKey
-		if out.PayloadResolvedWithKey, err = json.Marshal(evt); err != nil {
-			w.log.Error("failed to marshal packetObservation event (resolved key variant)", "error", err)
-			out.PayloadResolvedWithKey = nil
+	wantResolved, wantKey, wantBoth := w.hub.PacketVariantsWanted()
+	if wantResolved || wantBoth {
+		evt.Observation.ResolvedPath = api.BuildResolvedPath(hashes, resolved)
+		if wantResolved {
+			if out.PayloadResolved, err = json.Marshal(evt); err != nil {
+				w.log.Error("failed to marshal packetObservation event (resolved variant)", "error", err)
+			}
 		}
+		if wantBoth {
+			evt.Observation.ObserverPublicKey = observerKey
+			if out.PayloadResolvedWithKey, err = json.Marshal(evt); err != nil {
+				w.log.Error("failed to marshal packetObservation event (resolved key variant)", "error", err)
+			}
+		}
+	}
+	if wantKey {
 		evt.Observation.ResolvedPath = nil
+		evt.Observation.ObserverPublicKey = observerKey
 		if out.PayloadWithKey, err = json.Marshal(evt); err != nil {
 			w.log.Error("failed to marshal packetObservation event (key variant)", "error", err)
 			out.PayloadWithKey = nil
@@ -482,27 +495,6 @@ func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt 
 		return
 	}
 	w.hub.Broadcast(out)
-}
-
-// parseNumber handles RSSI and SNR fields that different observer types send as
-// either a bare JSON number (e.g. -108) or a quoted string (e.g. "-108").
-// Returns 0 if the value is missing or unparseable.
-func parseNumber(raw json.RawMessage) float64 {
-	if len(raw) == 0 {
-		return 0
-	}
-	// try unquoted number first
-	var f float64
-	if err := json.Unmarshal(raw, &f); err == nil {
-		return f
-	}
-	// try quoted string
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		f, _ = strconv.ParseFloat(s, 64)
-		return f
-	}
-	return 0
 }
 
 func inferObserverType(source, clientVersion string) string {

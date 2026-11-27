@@ -91,3 +91,18 @@ func TestRouteEvidenceHandler(t *testing.T) {
 		}
 	}
 }
+
+// A cursor carries the path representation of its first page; the path is not a query parameter.
+func TestRouteEvidenceCursorKeepsPath(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	since := now.Add(-24 * time.Hour)
+	c := api.RouteEvidenceCursor{IATA: "YOW", PathKey: evidenceKey, Since: since, Until: now, HeardAt: since.Add(time.Hour), ID: 5, HashSize: 2, PathBytes: "aa01bb02"}
+	next, err := routeEvidenceQuery(httptest.NewRequest("GET", "/?pageCursor="+url.QueryEscape(c.String()), nil), "YOW", evidenceKey, now)
+	if err != nil || next.Cursor == nil || next.Cursor.HashSize != 2 || next.Cursor.PathBytes != c.PathBytes {
+		t.Fatalf("cursor path lost: %+v %v", next, err)
+	}
+	q, err := routeEvidenceQuery(httptest.NewRequest("GET", "/?hashSize=2&pathBytes=aa01bb02", nil), "YOW", evidenceKey, now)
+	if err != nil || q.HashSize != 0 || q.PathBytes != "" {
+		t.Fatalf("path taken from the query string: %+v %v", q, err)
+	}
+}

@@ -1317,8 +1317,24 @@ ON CONFLICT (public_key) DO UPDATE SET
   radio_freq_mhz  = EXCLUDED.radio_freq_mhz,
   radio_sf        = EXCLUDED.radio_sf,
   radio_bw_khz    = EXCLUDED.radio_bw_khz,
+  prev_clock_drift_seconds = nodes.device_clock_drift_seconds,
   device_clock_drift_seconds = EXCLUDED.device_clock_drift_seconds
 RETURNING *;
+
+-- name: RecordClockDrift :exec
+-- Keep 16 adverts, including the INSERT's row. Sibling CTEs share a snapshot:
+-- the table scan alone cannot see the new row. A conflict returns no extra row.
+WITH ins AS (
+    INSERT INTO node_clock_drifts (node_id, advert_at, drift_seconds) VALUES (@node_id, now(), @drift_seconds)
+    ON CONFLICT (node_id, advert_at) DO NOTHING
+    RETURNING advert_at
+), recent AS (
+    SELECT advert_at FROM node_clock_drifts WHERE node_id = @node_id
+    UNION ALL SELECT advert_at FROM ins
+)
+DELETE FROM node_clock_drifts x
+WHERE x.node_id = @node_id
+  AND x.advert_at < (SELECT advert_at FROM recent ORDER BY advert_at DESC OFFSET 15 LIMIT 1);
 
 -- name: SetNodeMultibytePaths :exec
 UPDATE nodes SET supports_multibyte_paths = TRUE
@@ -1334,6 +1350,7 @@ UPDATE nodes SET default_scope_id = $2 WHERE id = $1;
 -- name: GetNodeByID :one
 SELECT n.*, ts.name AS default_scope_name,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key) AS is_poller,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
@@ -1385,6 +1402,11 @@ WHERE
   AND (n.last_seen, n.id) < ($7::timestamptz, $12::uuid)
   AND ($9::text = '' OR ts.name = $9::text)
   AND ($11::text = '' OR encode(n.public_key, 'hex') ILIKE $11 || '%')
+  AND (
+    $13::text = 'any'
+    OR ($13::text = 'true' AND EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key))
+    OR ($13::text = 'false' AND NOT EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key))
+  )
 ORDER BY n.last_seen DESC, n.id DESC
 LIMIT $8
 )
@@ -1393,6 +1415,7 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key) AS is_poller,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
   (CASE WHEN $10::bool THEN
@@ -1441,6 +1464,11 @@ WHERE
   AND (@name::text = '' OR n.name ILIKE '%' || @name::text || '%')
   AND (@scope::text = '' OR ts.name = @scope::text)
   AND (@pubkey_prefix::text = '' OR encode(n.public_key, 'hex') ILIKE @pubkey_prefix::text || '%')
+  AND (
+    @poller::text = 'any'
+    OR (@poller::text = 'true' AND EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key))
+    OR (@poller::text = 'false' AND NOT EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key))
+  )
 ), page AS (
 SELECT * FROM keyed
 WHERE NOT @has_cursor::bool
@@ -1462,6 +1490,7 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key) AS is_poller,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
   (CASE WHEN @include_neighbors::bool THEN
@@ -1503,7 +1532,8 @@ SELECT public_key FROM nodes WHERE id = $1;
 
 -- name: GetNodeActivityHourly :many
 -- Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
--- the node's packets first heard in [@packet_from, @packet_until).
+-- the node's packets first heard in [@packet_from, @packet_until) and through its older packets heard again
+-- since @late_from. Each branch reads one range of an (origin_pubkey, time) index, and no packet is in both.
 WITH src AS (
   SELECT a.hour AS t, a.observations, a.snr_sum, a.snr_n, a.rssi_sum, a.rssi_n, a.hop_sum, a.hop_n
   FROM analytics_hourly_node_activity a
@@ -1519,6 +1549,16 @@ WITH src AS (
   WHERE p.origin_pubkey = @origin_pubkey::bytea
     AND p.first_heard_at >= @packet_from::timestamptz AND p.first_heard_at < @packet_until::timestamptz
     AND po.heard_at >= GREATEST(@since::timestamptz, @tail_start::timestamptz) AND po.heard_at < @until::timestamptz
+  UNION ALL
+  SELECT lo.heard_at, 1::bigint, ls.snr::double precision, (ls.snr IS NOT NULL)::int::bigint,
+         ls.rssi::bigint, (ls.rssi IS NOT NULL)::int::bigint, lo.hop_count::bigint, 1::bigint
+  FROM packets lp
+  JOIN packet_observations lo ON lo.packet_hash = lp.packet_hash
+  CROSS JOIN LATERAL (SELECT CASE WHEN NOT (COALESCE(lo.rssi, 0) = 0 AND COALESCE(lo.snr, 0) = 0) THEN lo.snr END AS snr,
+                             CASE WHEN NOT (COALESCE(lo.rssi, 0) = 0 AND COALESCE(lo.snr, 0) = 0) THEN lo.rssi END AS rssi) ls
+  WHERE lp.origin_pubkey = @origin_pubkey::bytea
+    AND lp.last_heard_at >= @late_from::timestamptz AND lp.first_heard_at < @packet_from::timestamptz
+    AND lo.heard_at >= GREATEST(@since::timestamptz, @tail_start::timestamptz) AND lo.heard_at < @until::timestamptz
 )
 SELECT
   date_trunc('hour', t, 'UTC')::timestamptz AS bucket,
@@ -2590,30 +2630,38 @@ SELECT (SELECT count(*) FROM batch) AS scanned,
        coalesce((SELECT path_key FROM batch ORDER BY iata DESC, path_key DESC LIMIT 1), ''::bytea)::bytea AS last_key;
 
 -- name: ReconfirmSliceEnd :one
--- Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
-SELECT r.iata, r.path_key FROM known_routes r
-WHERE (r.iata, r.path_key) > (@after_iata::bpchar, @after_key::bytea)
-ORDER BY r.iata, r.path_key
-OFFSET @offset_rows LIMIT 1;
+-- Count the bounded slice and return its last key. A short slice ends the cycle.
+SELECT slice.iata, slice.path_key, (count(*) OVER ())::bigint AS skipped
+FROM (
+    SELECT r.iata, r.path_key FROM known_routes r
+    WHERE (r.iata, r.path_key) > (@after_iata::bpchar, @after_key::bytea)
+    ORDER BY r.iata, r.path_key
+    LIMIT @batch_size::int
+) AS slice
+ORDER BY slice.iata DESC, slice.path_key DESC LIMIT 1;
 
 -- name: ReconfirmNeighbors :exec
 -- Delete node_neighbors where the neighbor has departed from node_short_ids
 -- for that IATA, or where its prefix_4 is now ambiguous.
-DELETE FROM node_neighbors nn
-WHERE NOT EXISTS (
-    SELECT 1 FROM node_short_ids ns
-    WHERE ns.node_id = nn.neighbor_id
-      AND ns.iata = nn.iata
+-- Check each distinct regional neighbor once. Keep the one-row lookup correlated:
+-- a flattened anti-join can rescan the whole identity catalogue for each edge.
+WITH invalid AS MATERIALIZED (
+    SELECT e.iata, e.neighbor_id
+    FROM (SELECT DISTINCT iata, neighbor_id FROM node_neighbors) e
+    LEFT JOIN LATERAL (
+        SELECT s.node_id FROM node_short_ids s
+        WHERE s.iata = e.iata AND s.node_id = e.neighbor_id
+          AND NOT EXISTS (
+              SELECT 1 FROM node_short_ids peer
+              WHERE peer.iata = s.iata AND peer.prefix_4 = s.prefix_4
+                AND peer.node_id <> s.node_id
+          )
+        LIMIT 1
+    ) valid ON true
+    WHERE valid.node_id IS NULL
 )
-OR (
-    SELECT COUNT(*) FROM node_short_ids ns
-    WHERE ns.iata = nn.iata
-      AND ns.prefix_4 = (
-          SELECT prefix_4 FROM node_short_ids
-          WHERE node_id = nn.neighbor_id
-            AND iata = nn.iata
-      )
-) > 1;
+DELETE FROM node_neighbors nn USING invalid
+WHERE nn.iata = invalid.iata AND nn.neighbor_id = invalid.neighbor_id;
 
 -- name: CreateAccount :one
 INSERT INTO accounts (name) VALUES (sqlc.arg(name))

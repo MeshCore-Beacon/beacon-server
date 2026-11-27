@@ -83,6 +83,14 @@ func (e errReader) GetObserverTelemetryBucketed(ctx context.Context, observerID 
 	return v, e.err
 }
 
+func (e errReader) GetNodeReadings(ctx context.Context, nodeID uuid.UUID, since, until time.Time, includeUntrusted bool) (v []api.NodeReading, polled bool, untrusted int, err error) {
+	return v, polled, untrusted, e.err
+}
+
+func (e errReader) GetNodePolling(ctx context.Context, nodeID uuid.UUID) (v *api.NodePolling, err error) {
+	return v, e.err
+}
+
 func (e errReader) GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration, until time.Time) (v *api.ObserverActivity, err error) {
 	return v, e.err
 }
@@ -99,10 +107,14 @@ func (e errReader) ListObserverAdverts(ctx context.Context, observerID uuid.UUID
 	return v, e.err
 }
 
-func (e errReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (v api.NodePage, err error) {
+func (e errReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (v api.NodePage, err error) {
 	return v, e.err
 }
-func (e errReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (v api.NodePage, err error) {
+func (e errReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (v api.NodePage, err error) {
+	return v, e.err
+}
+
+func (e errReader) ListLatestNodeReadings(ctx context.Context, iatas []string, since time.Time) (v []api.NodeLatestReading, err error) {
 	return v, e.err
 }
 

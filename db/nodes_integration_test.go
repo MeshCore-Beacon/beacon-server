@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"crypto/md5"
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
@@ -42,7 +43,7 @@ func TestListNodesPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	for _, table := range []string{"nodes", "node_iatas", "node_neighbors", "observers", "transport_scopes"} {
+	for _, table := range []string{"nodes", "node_iatas", "node_neighbors", "observers", "polling_claims", "transport_scopes"} {
 		if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
 			t.Fatal(err)
 		}
@@ -65,14 +66,16 @@ SELECT md5(i::text)::uuid, md5((i+1)::text)::uuid, iata
 FROM generate_series(1, 19999) i CROSS JOIN (VALUES ('YVR'), ('YYJ')) regions(iata);
 INSERT INTO observers (id, public_key)
 SELECT id, public_key FROM nodes WHERE name = 'node-10';
-ANALYZE nodes; ANALYZE node_iatas; ANALYZE node_neighbors; ANALYZE observers; ANALYZE transport_scopes;
+INSERT INTO polling_claims (observer_public_key, observer_id, claimed_at, received_at)
+SELECT public_key, id, now(), now() FROM nodes WHERE name = 'node-10';
+ANALYZE nodes; ANALYZE node_iatas; ANALYZE node_neighbors; ANALYZE observers; ANALYZE polling_claims; ANALYZE transport_scopes;
 `)
 	if err != nil {
 		t.Fatal(err)
 	}
 	query := sqlc.New(tx)
 	page1 := pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}
-	base := sqlc.ListNodesParams{Column1: int16(0), Column3: "any", Column4: "any", Column6: "", Column7: page1, Limit: 51, Column12: uuid.Nil}
+	base := sqlc.ListNodesParams{Column1: int16(0), Column3: "any", Column4: "any", Column6: "", Column7: page1, Limit: 51, Column12: uuid.Nil, Column13: "any"}
 	for _, tc := range []struct {
 		name   string
 		change func(*sqlc.ListNodesParams)
@@ -92,6 +95,8 @@ ANALYZE nodes; ANALYZE node_iatas; ANALYZE node_neighbors; ANALYZE observers; AN
 		}, []int{4, 5, 6}},
 		{"public key", func(p *sqlc.ListNodesParams) { p.Column5, _ = hex.DecodeString(fmt.Sprintf("%064x", 10)) }, []int{10}},
 		{"public key prefix", func(p *sqlc.ListNodesParams) { p.Column11 = strings.Repeat("0", 61) + "00A" }, []int{10}},
+		{"poller", func(p *sqlc.ListNodesParams) { p.Column13 = "true" }, []int{10}},
+		{"not poller", func(p *sqlc.ListNodesParams) { p.Column13 = "false"; p.Limit = 3 }, []int{1, 2, 3}},
 		{"no IATA", func(p *sqlc.ListNodesParams) { p.Column5, _ = hex.DecodeString(fmt.Sprintf("%064x", 20000)) }, []int{20000}},
 	} {
 		for _, neighbors := range []bool{false, true} {
@@ -142,11 +147,44 @@ ANALYZE nodes; ANALYZE node_iatas; ANALYZE node_neighbors; ANALYZE observers; AN
 					if row.IsObserver != (number == 10) {
 						t.Error("wrong observer flag")
 					}
+					if row.IsPoller != (number == 10) {
+						t.Error("wrong poller flag")
+					}
 					if number == 10 && row.ObserverID != row.ID {
 						t.Error("wrong observer ID")
 					}
 				}
 			})
+		}
+	}
+
+	store := &Store{q: query, staleThreshold: 24 * time.Hour}
+	for number, want := range map[int]bool{10: true, 11: false} {
+		node, err := store.GetNode(ctx, uuid.MustParse(fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprint(number))))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if node.IsPoller != want {
+			t.Errorf("GetNode node-%d IsPoller = %v, want %v", number, node.IsPoller, want)
+		}
+	}
+	yes, no := true, false
+	for _, tc := range []struct {
+		poller *bool
+		first  string
+		n      int
+	}{{&yes, "node-10", 1}, {&no, "node-1", 3}, {nil, "node-1", 3}} {
+		page, err := store.ListNodes(ctx, 0, nil, nil, nil, tc.poller, nil, "", "", "", 0, nil, 3, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) != tc.n || page.Items[0].Name == nil || *page.Items[0].Name != tc.first {
+			t.Errorf("ListNodes poller=%v: %d items, first %v", tc.poller, len(page.Items), page.Items[0].Name)
+		}
+		for _, it := range page.Items {
+			if it.IsPoller != (it.Name != nil && *it.Name == "node-10") {
+				t.Errorf("ListNodes poller=%v: wrong IsPoller on %v", tc.poller, it.Name)
+			}
 		}
 	}
 
@@ -156,7 +194,7 @@ ANALYZE nodes; ANALYZE node_iatas; ANALYZE node_neighbors; ANALYZE observers; AN
 	sql := strings.Split(strings.Split(queries, "-- name: ListNodes :many\n")[1], "\n-- name:")[0]
 	var planJSON []byte
 	err = tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+sql,
-		int16(0), []string(nil), "any", "any", []byte(nil), "", page1, int32(51), "", false, "", uuid.Nil).Scan(&planJSON)
+		int16(0), []string(nil), "any", "any", []byte(nil), "", page1, int32(51), "", false, "", uuid.Nil, "any").Scan(&planJSON)
 	if err != nil {
 		t.Fatal(err)
 	}

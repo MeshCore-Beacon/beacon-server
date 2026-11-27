@@ -26,14 +26,27 @@ type counter struct {
 	lastT   int64
 	seeded  bool
 	rejects int
+	outcome counterOutcome // what the latest add did, for callers that track the covered time span
 }
 
+type counterOutcome int
+
+const (
+	outcomeNone     counterOutcome = iota // no value, nothing changed
+	outcomeSeeded                         // first value or after a long gap: new baseline, no increment
+	outcomeAccepted                       // increment counted, baseline moved
+	outcomeRejected                       // reading dropped, baseline kept
+	outcomeResynced                       // third rejection: baseline moved, no increment
+)
+
 func (c *counter) add(v *float64, t int64, rebooted bool) float64 {
+	c.outcome = outcomeNone
 	if v == nil {
 		return 0
 	}
 	if !c.seeded || t-c.lastT > c.maxGap {
 		c.last, c.lastT, c.seeded, c.rejects = *v, t, true, 0
+		c.outcome = outcomeSeeded
 		return 0
 	}
 	d := *v - c.last
@@ -43,9 +56,13 @@ func (c *counter) add(v *float64, t int64, rebooted bool) float64 {
 	// Rows are truncated to the telemetry resolution, so allow twice the gap.
 	if d < 0 || d > c.rate*2*float64(t-c.lastT)/1000 {
 		if c.rejects++; c.rejects < 3 {
+			c.outcome = outcomeRejected
 			return 0
 		}
 		d = 0
+		c.outcome = outcomeResynced
+	} else {
+		c.outcome = outcomeAccepted
 	}
 	c.last, c.lastT, c.rejects = *v, t, 0
 	return d

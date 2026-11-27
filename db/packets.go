@@ -472,9 +472,8 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 				HashSize: v.HashSize,
 				HopCount: v.HopCount,
 			},
-			RSSI: v.Rssi,
-			SNR:  v.Snr,
 		}
+		obs.RSSI, obs.SNR = storedSignal(v.Rssi, v.Snr)
 		if v.SourceBroker != nil {
 			obs.SourceBroker = *v.SourceBroker
 		}
@@ -515,6 +514,9 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 			}
 			pb := hex.EncodeToString(traceHashBytes)
 			obs.PathBytes = &pb
+			// The frame is rebuilt from the bytes that were in the path slot, which pathBytes no longer holds.
+			wire := hex.EncodeToString(v.PathBytes)
+			obs.WirePathBytes = &wire
 			obs.PathLength.HashSize = int16(len(traceRawHashes[0]))
 			obs.PathLength.HopCount = int16(len(traceRawHashes))
 		} else if v.PathBytes != nil {
@@ -563,8 +565,8 @@ func observationParams(o ingest.InsertObservationParams) sqlc.InsertObservationP
 		HashSize:          int16(o.HashSize),
 		HopCount:          int16(o.HopCount),
 		PathBytes:         o.PathBytes,
-		Rssi:              &o.RSSI,
-		Snr:               &o.SNR,
+		Rssi:              o.RSSI,
+		Snr:               o.SNR,
 		PropagationTimeMs: &o.PropagationTimeMs,
 		RadioFreqMhz:      &o.RadioFreqMHz,
 		SpreadFactor:      &o.SpreadFactor,
@@ -629,6 +631,7 @@ func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, curs
 	}
 	items := make([]api.PacketObservationSummary, 0, len(rows))
 	for _, v := range rows {
+		rssi, snr := storedSignal(v.Rssi, v.Snr)
 		items = append(items, api.PacketObservationSummary{
 			ID:              v.ID,
 			PacketHash:      v.PacketHashHex,
@@ -636,8 +639,8 @@ func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, curs
 			PayloadTypeName: api.PayloadTypeName(v.PayloadType),
 			IATA:            v.Iata,
 			HeardAt:         v.HeardAt.Time.UnixMilli(),
-			RSSI:            v.Rssi,
-			SNR:             v.Snr,
+			RSSI:            rssi,
+			SNR:             snr,
 			HopCount:        &v.HopCount,
 		})
 	}

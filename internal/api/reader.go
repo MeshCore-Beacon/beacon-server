@@ -101,6 +101,14 @@ type Reader interface {
 	// GetObserverTelemetryBucketed returns telemetry points for an observer bucketed into N-hour intervals.
 	GetObserverTelemetryBucketed(ctx context.Context, observerID uuid.UUID, since, until time.Time, bucketHours int32) ([]ObserverTelemetryPoint, error)
 
+	// GetNodeReadings returns a node's repeater readings in [since, until) ascending (until open when zero), led by the
+	// newest status reading before since as a counter baseline. Untrusted readings are left out unless includeUntrusted,
+	// and counted. polled reports whether the node has any reading at all. Returns pgx.ErrNoRows for an unknown node.
+	GetNodeReadings(ctx context.Context, nodeID uuid.UUID, since, until time.Time, includeUntrusted bool) (readings []NodeReading, polled bool, untrusted int, err error)
+
+	// GetNodePolling returns who polls a node and its newest trusted reading. Returns pgx.ErrNoRows for an unknown node.
+	GetNodePolling(ctx context.Context, nodeID uuid.UUID) (*NodePolling, error)
+
 	// GetObserverActivity returns bucketed heard-activity for an observer over the trailing window.
 	// interval >= 1h is served from the hourly rollup. Returns pgx.ErrNoRows for an unknown observer.
 	// Range and Interval on the result are left empty for the handler to fill.
@@ -119,11 +127,15 @@ type Reader interface {
 	// populated with the distinct set of neighbor node IDs (across all
 	// IATAs); otherwise it's left nil to avoid the extra aggregation.
 	// cursor is last_seen epoch ms of the last node; pageCursor wins over it.
-	ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *NodeCursor, limit int32, includeNeighbors bool) (NodePage, error)
+	ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *NodeCursor, limit int32, includeNeighbors bool) (NodePage, error)
+
+	// ListLatestNodeReadings returns each polled node's newest trusted battery and temperature at or after since,
+	// limited to nodes heard in iatas (all when empty). Nodes with neither value are left out.
+	ListLatestNodeReadings(ctx context.Context, iatas []string, since time.Time) ([]NodeLatestReading, error)
 
 	// ListNodesSorted is ListNodes in sort's order, paged by the previous page's cursor (nil for
 	// the first page). Unnamed nodes come last in either name order; ties go newest first.
-	ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort NodeSort, pageCursor *NodeSortCursor, limit int32, includeNeighbors bool) (NodePage, error)
+	ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort NodeSort, pageCursor *NodeSortCursor, limit int32, includeNeighbors bool) (NodePage, error)
 
 	// GetNode returns full detail for a single node by UUID.
 	// Returns nil, pgx.ErrNoRows if the node is not found.

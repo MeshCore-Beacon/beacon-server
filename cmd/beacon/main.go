@@ -21,6 +21,7 @@ import (
 	pgdata "github.com/MeshCore-Beacon/beacon-server/db/planguard"
 	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 	"github.com/MeshCore-Beacon/beacon-server/docs"
+	"github.com/MeshCore-Beacon/beacon-server/internal/alerts"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/router"
@@ -34,12 +35,15 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
 	"github.com/MeshCore-Beacon/beacon-server/internal/logging"
+	"github.com/MeshCore-Beacon/beacon-server/internal/mail"
 	"github.com/MeshCore-Beacon/beacon-server/internal/meshmapper"
 	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	"github.com/MeshCore-Beacon/beacon-server/internal/obscount"
 	"github.com/MeshCore-Beacon/beacon-server/internal/planguard"
+	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/MeshCore-Beacon/beacon-server/internal/presence"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
+	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -51,7 +55,7 @@ import (
 var version = "dev"
 
 //	@title			MeshCore Beacon API
-//	@version		2.2.0
+//	@version		2.3.0
 //	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
 //	@description	REST requests share a configurable per-client rate limit (default 600/minute and a 600-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.
 //	@description	WebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.
@@ -73,6 +77,13 @@ var version = "dev"
 // @name Authorization
 // @description Enter Bearer followed by the configured operator key. Use HTTPS.
 
+// @securityDefinitions.apikey UserSession
+// @in header
+// @name Authorization
+// @description Enter Bearer followed by an app session token from POST /auth/app/token. Web sessions use the beacon_session cookie and the X-Beacon-CSRF header instead.
+
+// @tag.name			Accounts
+// @tag.description	Sign-in, sessions and the signed-in user's profile; 404 accounts_disabled unless accounts.mode is local
 // @tag.name			IATAs
 // @tag.description	Airport/location codes that group observers and packets
 // @tag.name			Regions
@@ -402,9 +413,9 @@ func main() {
 	}
 
 	// ── Build geographic ingest filter ───────────────────────────────────────────────────────────
-	allowedIATAs := iatadb.BuildAllowedSet(cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents)
+	allowedIATAs := iatadb.BuildAllowedSet(cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents, cfg.Ingest.AllowIATAs)
 	if allowedIATAs != nil {
-		slog.Info(fmt.Sprintf("config: ingest filter active — %d allowed IATAs (countries=%v continents=%v)", len(allowedIATAs), cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents), "component", "startup")
+		slog.Info(fmt.Sprintf("config: ingest filter active — %d allowed IATAs (countries=%v continents=%v iatas=%v)", len(allowedIATAs), cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents, cfg.Ingest.AllowIATAs), "component", "startup")
 	} else {
 		slog.Info("config: ingest filter inactive — accepting all IATAs", "component", "startup")
 	}
@@ -440,6 +451,132 @@ func main() {
 		keys,
 		scopes,
 	)
+
+	// ── Accounts ─────────────────────────────────────────────────────────────
+	// The SMTP password is read here and never logged; only on/off and the public host are.
+	resolvedAccounts, err := cfg.Accounts.ResolveWithSecrets(os.Getenv("BEACON_SMTP_PASSWORD"), os.Getenv("BEACON_PORTAL_SECRET"))
+	if err != nil {
+		slog.Error("invalid accounts configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	// The web's wordmark variable also names the instance in mail; the server container gets the same .env.
+	resolvedAccounts.InstanceName = config.InstanceName(os.Getenv("VITE_APP_NAME"))
+	accountsHost := ""
+	if resolvedAccounts.PublicURL != nil {
+		accountsHost = resolvedAccounts.PublicURL.Host
+	}
+	slog.Info("accounts", "component", "startup", "enabled", resolvedAccounts.Enabled, "public_host", accountsHost, "instance_name", resolvedAccounts.InstanceName)
+	accountsMode := "off"
+	// Left an untyped nil while accounts are off: a nil *users.Service stored in the interface would be called.
+	var accountsSvc handlers.AccountsService
+	var usersService *users.Service
+	var accountMailer mail.Sender // nil while accounts are off
+	var authOptions handlers.AuthOptions
+	portalURL := ""
+	resolvedAtlas, err := cfg.Atlas.Resolve()
+	if err != nil {
+		slog.Error("invalid atlas configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	var meMounts []handlers.MeMount
+	if resolvedAccounts.Enabled {
+		meMounts = append(meMounts, handlers.AtlasRoutes(maintStore, resolvedAtlas.Limit))
+		accountsMode = "local"
+		var sender mail.Sender = mail.Discard{} // portal users have no address, so nothing is mailed
+		if !resolvedAccounts.Portal {
+			sender = mail.NewSMTP(resolvedAccounts.SMTPHost, resolvedAccounts.SMTPPort, resolvedAccounts.SMTPUsername,
+				resolvedAccounts.SMTPPassword, mail.WithDisplayName(resolvedAccounts.SMTPFrom, resolvedAccounts.InstanceName), resolvedAccounts.SMTPStartTLS)
+		}
+		accountMailer = sender
+		usersService = users.NewService(maintStore, sender, resolvedAccounts, time.Now, slog.Default())
+		accountsSvc = usersService
+		authOptions = handlers.AuthOptions{
+			Enabled: true, CookieSecure: resolvedAccounts.CookieSecure,
+			PublicOrigin:   resolvedAccounts.PublicURL.Scheme + "://" + resolvedAccounts.PublicURL.Host,
+			AllowedOrigins: cfg.CORS.AllowedOrigins, ReadOnly: resolved.ReadOnly,
+		}
+		if resolvedAccounts.Portal {
+			accountsMode = "portal"
+			portalURL = resolvedAccounts.PortalURL.String()
+			authOptions.Portal = users.NewPortal(usersService, maintStore, resolvedAccounts, nil)
+		}
+		slog.Info("accounts mode", "component", "startup", "mode", accountsMode, "registration_open", resolvedAccounts.RegistrationOpen)
+	}
+
+	resolvedDisplay, err := cfg.Display.Resolve()
+	if err != nil {
+		slog.Error("invalid display configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+
+	// ── Repeater polling ─────────────────────────────────────────────────────
+	// config.Load already validated the section. The write-side service sits on the ingest store, which has a
+	// pool for the claim and election transactions, and is not wrapped by the presence coalescer.
+	resolvedPolling, err := cfg.Polling.Resolve()
+	if err != nil {
+		slog.Error("invalid polling configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	maintStore.SetPollingEnabled(resolvedPolling.Enabled) // alerts read it: with polling off, telemetry rules go inactive
+	slog.Info("repeater polling", "component", "startup", "enabled", resolvedPolling.Enabled, "mqtt_hosts", len(resolvedPolling.MQTTHosts), "hosts", resolvedPolling.MQTTHosts)
+	var pollingSvc *polling.Service
+	var guestPolling handlers.GuestPolling // stays an untyped nil unless polling is on
+	if resolvedPolling.Enabled {
+		if mode.Ingest {
+			pollingSvc = polling.NewService(ingestStore, resolvedPolling, time.Now, slog.Default())
+			broker1.SetPolling(pollingSvc)
+			broker2.SetPolling(pollingSvc)
+			guestPolling = pollingSvc
+		} else {
+			// Read-only: only Policy and Owners are asked, so the read-routed API store is enough.
+			guestPolling = polling.NewService(apiStore, resolvedPolling, time.Now, slog.Default())
+		}
+	}
+
+	// Telemetry requests sit on polling and accounts and seal guest passwords under BEACON_SECRET_KEY.
+	requestSealer, requestsOff, err := telemetryRequestsSealer(resolvedPolling, resolvedAccounts.Enabled, os.Getenv("BEACON_SECRET_KEY"))
+	if err != nil {
+		slog.Error("invalid secret key", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	var requestsSvc handlers.RequestsService // an untyped nil answers 404 requests_disabled
+	if requestSealer != nil {
+		var elector polling.Elector
+		if pollingSvc != nil {
+			elector = pollingSvc
+		}
+		if pollingSvc != nil {
+			pollingSvc.SetRequests(ingestStore, requestSealer)
+		}
+		if gp, ok := guestPolling.(*polling.Service); ok && gp != pollingSvc {
+			gp.SetRequests(apiStore, requestSealer) // read-only: owners answers only read the password in use
+		}
+		requestsSvc = polling.NewRequestService(maintStore, requestSealer, elector, resolvedPolling.RequestsPerUser, time.Now, slog.Default())
+		slog.Info("telemetry requests", "component", "startup", "per_user", resolvedPolling.RequestsPerUser)
+	} else if requestsOff != "" {
+		slog.Info("telemetry requests are off", "component", "startup", "reason", requestsOff)
+	}
+	// Alerts need accounts: rules hang on a user's Atlas.
+	warnRetiredPushCredentials(os.LookupEnv)
+	resolvedAlerts, err := cfg.Alerts.ResolveWithSecret(cfg.Accounts.Mode, os.Getenv("BEACON_PUSH_SECRET"))
+	if err != nil {
+		slog.Error("invalid alerts configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	alertEmail, alertPush := alertChannels(resolvedAlerts, resolvedAccounts.Enabled, accountMailer)
+	var alertsSvc handlers.AlertsService // an untyped nil answers 404 alerts_disabled
+	if alertEmail || alertPush {
+		alertsSvc = alerts.NewService(maintStore, alerts.ServerChannels{Email: alertEmail, Push: alertPush, Portal: resolvedAccounts.Portal}, time.Now)
+	}
+	slog.Info("alerts", "component", "startup", "email", alertEmail, "push", alertPush, "enabled", alertsSvc != nil)
+	alertSender, pushRelay := newAlertSender(resolvedAlerts, resolvedAccounts.Enabled, accountMailer, maintStore, resolvedAccounts.PublicURL)
+	if alertSender != nil {
+		alertSender.SetInstanceName(resolvedAccounts.InstanceName)
+		alertSender.SetTemperatureUnit(resolvedDisplay.TemperatureUnit)
+	}
+	if resolvedAccounts.Enabled {
+		meMounts = append(meMounts, handlers.RequestRoutes(requestsSvc), handlers.AlertRoutes(alertsSvc))
+	}
 
 	if cr, ok := reader.(*cache.CachedReader); ok {
 		if scopeImporter != nil {
@@ -553,6 +690,28 @@ func main() {
 	if pgTask != nil {
 		tasks = append(tasks, *pgTask)
 	}
+	if usersService != nil {
+		// The mail worker stops with ctx, then sends what is queued; shutdown waits for it.
+		mailDone := usersService.Start(ctx)
+		backgroundJobs.Go(func() { <-mailDone })
+		if mode.Jobs {
+			tasks = append(tasks, background.UsersTasks(maintStore)...)
+		}
+	}
+	if alertSender != nil && mode.Jobs {
+		tasks = append(tasks, background.AlertTasks(db.AlertEval{Store: maintStore}, alertSender)...)
+		if pushRelay != nil {
+			backgroundJobs.Go(func() { alerts.RunHello(ctx, pushRelay) })
+		}
+	}
+	if pollingSvc != nil && mode.Jobs {
+		tasks = append(tasks, background.PollingTasks(pollingSvc, background.NewPollingMaint(maintStore), resolvedPolling)...)
+		if requestsSvc != nil {
+			tasks = append(tasks, background.RequestTasks(maintStore, resolvedPolling.OfflineDisableDays)...)
+		}
+	} else if mode.Jobs {
+		tasks = append(tasks, background.PollingCleanupTask(background.NewPollingMaint(maintStore), resolvedPolling))
+	}
 	profiles := configureProfiling(ctx, pools.Maint)
 	defer profiles.Stop()
 	for i := range tasks {
@@ -569,6 +728,14 @@ func main() {
 	// Wrap after wiring cache invalidators and cleanup callbacks to the actual
 	// CachedReader. Only response projections receive the geographic annotation.
 	reader = api.WithLocalBorders(reader, localBorders)
+	var pollingAdmin handlers.PollingAdminStore // nil answers 503
+	if resolvedPolling.Enabled && !resolved.ReadOnly {
+		pollingAdmin = maintStore
+	}
+	var usersAdmin handlers.UsersAdminStore // nil answers 503
+	if usersService != nil {
+		usersAdmin = maintStore
+	}
 	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, router.Options{
 		MaxConnsPerIP:        resolved.MaxConnsPerIP,
 		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
@@ -585,7 +752,17 @@ func main() {
 			"/accounts": handlers.AccountsRouter(maintStore),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),
 			"/db":       handlers.DBAdminRouter(maintStore, pgSource),
+			"/users":    handlers.UsersAdminRouter(usersAdmin, resolved.ReadOnly),
+			"/polling": handlers.PollingAdminRouter(pollingAdmin, handlers.PollingAdminConfig{
+				Paused: resolvedPolling.Paused, Authority: resolvedPolling.Authority, ExcludedNodes: resolvedPolling.ExcludedNodes}),
 		},
+		GuestPolling:    guestPolling,
+		PollingEnabled:  resolvedPolling.Enabled,
+		TemperatureUnit: resolvedDisplay.TemperatureUnit, DistanceUnit: resolvedDisplay.DistanceUnit,
+		AtlasLimit:   resolvedAtlas.Limit,
+		AccountsMode: accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen, PortalURL: portalURL,
+		AlertEmail: alertEmail, AlertPush: alertPush, PushServer: resolvedAlerts.PushServer, PushID: resolvedAlerts.PushID, PushSecret: resolvedAlerts.PushSecret,
+		Accounts: accountsSvc, AuthOptions: authOptions, MeMounts: meMounts, TelemetryRequests: requestsSvc != nil,
 		Guards:        guard,
 		APIPlanLayout: string(layout),
 	})

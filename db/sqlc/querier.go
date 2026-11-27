@@ -13,6 +13,10 @@ import (
 )
 
 type Querier interface {
+	// Completes a sign-up: the username and password hash of the verified sign-up replace the row's, the address counts
+	// as verified, and every verify token and session of the account goes, in one statement. No row when the user is
+	// already verified, disabled or gone.
+	ActivateUser(ctx context.Context, arg ActivateUserParams) (uuid.UUID, error)
 	// An empty region places the channel Beacon-wide.
 	AddChannelConfigScopes(ctx context.Context, arg AddChannelConfigScopesParams) error
 	AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error
@@ -23,36 +27,112 @@ type Querier interface {
 	AddChannelMessageIATA(ctx context.Context, arg AddChannelMessageIATAParams) (bool, error)
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
+	// What each of the nodes is and what a polled one reports, over the readings since the cutoff.
+	AlertNodeCaps(ctx context.Context, arg AlertNodeCapsParams) ([]AlertNodeCapsRow, error)
+	// For each repeater, the battery reading closest to 24 hours before its newest one, within 3 hours of that mark.
+	AlertNodeDayAgo(ctx context.Context, arg AlertNodeDayAgoParams) ([]AlertNodeDayAgoRow, error)
+	// For each repeater and the oldest cursor of its clock rule: the advert drift at or before the cursor (the pair's
+	// first half), then every kept advert after it, oldest first. The table keeps at most 16 per node.
+	AlertNodeDrifts(ctx context.Context, arg AlertNodeDriftsParams) ([]AlertNodeDriftsRow, error)
+	// The newest trusted readings of each repeater within the window, at most 12 each.
+	AlertNodeReadings(ctx context.Context, arg AlertNodeReadingsParams) ([]AlertNodeReadingsRow, error)
+	// For each repeater and the cursor of its reboot rule: the newest trusted uptime reading at or before the cursor (the
+	// baseline), then the oldest page_size readings after it, so every reading since the cursor is reached page by page.
+	AlertNodeUptimes(ctx context.Context, arg AlertNodeUptimesParams) ([]AlertNodeUptimesRow, error)
+	// polled is the same test as the overview's (AlertNodeCaps): a current polling assignment while polling is on.
+	AlertNodesData(ctx context.Context, arg AlertNodesDataParams) ([]AlertNodesDataRow, error)
+	AlertObserverCaps(ctx context.Context, arg AlertObserverCapsParams) ([]AlertObserverCapsRow, error)
+	AlertObserverDayAgo(ctx context.Context, arg AlertObserverDayAgoParams) ([]AlertObserverDayAgoRow, error)
+	AlertObserverTelemetry(ctx context.Context, arg AlertObserverTelemetryParams) ([]AlertObserverTelemetryRow, error)
+	// The same for an observer's status telemetry.
+	AlertObserverUptimes(ctx context.Context, arg AlertObserverUptimesParams) ([]AlertObserverUptimesRow, error)
+	// polled is the same test as the overview's (AlertObserverCaps): status telemetry within fresh_since.
+	AlertObserversData(ctx context.Context, arg AlertObserversDataParams) ([]AlertObserversDataRow, error)
+	// The next enabled rules of live users after the id, with the name the user gave the pin and, for a back_online
+	// rule, when the radio's gone_quiet rule last recovered and whether that rule is on.
+	AlertRuleBatch(ctx context.Context, arg AlertRuleBatchParams) ([]AlertRuleBatchRow, error)
+	AlertsEvalUnlock(ctx context.Context) error
+	AlertsSendUnlock(ctx context.Context) error
+	// Stores what the evaluation decided, only for rules not edited since they were read (same version). Returns the ids
+	// that were stored.
+	ApplyAlertUpdates(ctx context.Context, arg ApplyAlertUpdatesParams) ([]uuid.UUID, error)
+	// Applies only the address the link was issued for ($2, lower case), so a later change of the pending address cannot ride on an old link.
+	// The pending address was verified by the link that got us here, so the account counts as verified too.
+	ApplyPendingEmail(ctx context.Context, arg ApplyPendingEmailParams) (int64, error)
 	// Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
 	// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
 	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
 	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error)
+	BeginAlertPass(ctx context.Context, passID uuid.UUID) error
+	// Counts a failed mail and holds it back for a minute, doubling with each earlier failure; the last allowed failure
+	// ends the channel.
+	BumpAlertEmailAttempts(ctx context.Context, arg BumpAlertEmailAttemptsParams) error
+	// As for mail, or held until hold_until when the push server asked for longer.
+	BumpAlertPushAttempts(ctx context.Context, arg BumpAlertPushAttemptsParams) error
+	BumpUserAtlas(ctx context.Context, arg BumpUserAtlasParams) (int64, error)
 	// Exact check of messages in (after_id, through_id]: pairs the definition has and the table lacks (counting
 	// observations up to obs_through only), and table pairs no stored observation backs.
 	CheckChannelMessageIATAs(ctx context.Context, arg CheckChannelMessageIATAsParams) (CheckChannelMessageIATAsRow, error)
 	// Exact check of every packet with an observation in (after_id, through_id]: site rows the observations imply
 	// and the table lacks, rows whose hearing time or packet columns differ, and rows no observation backs.
 	CheckPacketSitesSlice(ctx context.Context, arg CheckPacketSitesSliceParams) (CheckPacketSitesSliceRow, error)
+	// Run under LockPollingTarget.
+	ClearNoPasswordBlocked(ctx context.Context, targetPublicKey []byte) (int64, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
+	// Renumbers the target's ranks 0..n-1 in their current order, so after a delete the best survivor polls. Only the
+	// lowest rank can become 0, so the one-poller index holds row by row. Run under LockPollingTarget.
+	CompactTargetAssignments(ctx context.Context, targetPublicKey []byte) error
+	// One statement, so a state is used once; an expired one is deleted and reported as missing by the caller.
+	ConsumePortalState(ctx context.Context, cookieHash []byte) (ConsumePortalStateRow, error)
+	// Spends a live reset token only while the address it was mailed to is still the account's address, in one statement.
+	ConsumeResetToken(ctx context.Context, arg ConsumeResetTokenParams) (uuid.UUID, error)
+	// One statement, so two concurrent uses cannot both match used_at IS NULL.
+	ConsumeUserToken(ctx context.Context, arg ConsumeUserTokenParams) (ConsumeUserTokenRow, error)
+	// Recomputed each pass. Counts other observers that heard a RESPONSE (1) or PATH (8) packet with the reading's
+	// 8-byte hash within 10 minutes of sampled_at. packets and packet_observations keep no source hash, so the
+	// sender is not checked; packet_observations.payload_type is not always filled, so the type comes from packets.
+	// A reading whose observer row was deleted counts every observer. Never-counted readings go first, oldest first,
+	// then counted ones newest first, so every reading is reached however many arrive.
+	CorroborateReadings(ctx context.Context, arg CorroborateReadingsParams) (int64, error)
 	// How many messages were sent at or after since, counted to at most row_limit: idx_channel_messages_sent alone.
 	CountChannelMessagesSentSince(ctx context.Context, arg CountChannelMessagesSentSinceParams) (int64, error)
+	CountTargetAssignments(ctx context.Context, targetPublicKey []byte) (int32, error)
+	CountUntrustedNodeReadings(ctx context.Context, arg CountUntrustedNodeReadingsParams) (int32, error)
+	CountUserRequests(ctx context.Context, userID uuid.UUID) (int32, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
+	CreatePortalState(ctx context.Context, arg CreatePortalStateParams) error
+	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (CreateUserSessionRow, error)
+	CreateUserToken(ctx context.Context, arg CreateUserTokenParams) error
+	CurrentPollingPoller(ctx context.Context, targetPublicKey []byte) ([]byte, error)
 	// Lock the current row before deciding the outcome, including when another
 	// deactivation commits while this statement is waiting for its row lock.
 	DeactivateAccount(ctx context.Context, id uuid.UUID) (DeactivateAccountRow, error)
+	DeleteAlertRule(ctx context.Context, arg DeleteAlertRuleParams) (int64, error)
 	DeleteAllChannelMembers(ctx context.Context) error
 	DeleteChannelConfigScopes(ctx context.Context) error
 	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
+	DeleteDevicesByToken(ctx context.Context, pushToken string) error
+	// A finished notice that ran out of attempts on a channel is dropped.
+	DeleteExhaustedAlerts(ctx context.Context, arg DeleteExhaustedAlertsParams) (int64, error)
+	DeleteExpiredPollingClaims(ctx context.Context, receivedAt pgtype.Timestamptz) error
+	DeleteExpiredPortalStates(ctx context.Context, cutoff pgtype.Timestamptz) error
+	DeleteExpiredRepeaterReadings(ctx context.Context, receivedAt pgtype.Timestamptz) error
 	// One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
 	// The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
 	// residual decides membership. + interval 0 keeps the exact cutoff a Filter, so the planner
 	// cannot switch to a last_seen index on deployments that still have one.
 	DeleteExpiredRoutes(ctx context.Context, arg DeleteExpiredRoutesParams) (DeleteExpiredRoutesRow, error)
+	DeleteExpiredUserSessions(ctx context.Context, cutoff pgtype.Timestamptz) error
+	DeleteExpiredUserTokens(ctx context.Context, cutoff pgtype.Timestamptz) error
 	// One batch of rarely-seen routes after the cursor, inside a window of at most 6 h below the grace
 	// cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
 	// version) and delete. unresolved_ts is the earliest candidate left behind; window_end is the bound used.
 	DeleteGraceRoutesSlice(ctx context.Context, arg DeleteGraceRoutesSliceParams) (DeleteGraceRoutesSliceRow, error)
+	// Run under LockPollingTarget, then CompactTargetAssignments.
+	DeleteObserverTargetAssignment(ctx context.Context, arg DeleteObserverTargetAssignmentParams) (int64, error)
+	DeleteOldAlertPasses(ctx context.Context, startedAt pgtype.Timestamptz) error
 	// Keeps the channel IATA filter in step with packet retention.
 	DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	// Deletes nodes not seen since the given cutoff. node_iatas and node_neighbors cascade-
@@ -71,16 +151,48 @@ type Querier interface {
 	DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error)
 	// Bumps coverage when hours go, so cached responses that included them are not reused.
 	DeleteOldRollups(ctx context.Context, cutoff pgtype.Timestamptz) error
+	DeleteOldServedVersions(ctx context.Context, servedAt pgtype.Timestamptz) error
 	// Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.
 	DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	DeleteOldTraceTags(ctx context.Context, lastHeardAt pgtype.Timestamptz) error
+	// Run under LockPollingTarget, so it cannot interleave with an election of the target.
+	DeleteOrphanPollingAssignments(ctx context.Context, targetPublicKey []byte) error
+	DeletePollingAdminStop(ctx context.Context, arg DeletePollingAdminStopParams) (int64, error)
+	DeletePollingAssignments(ctx context.Context, targetPublicKey []byte) error
+	DeletePollingCandidates(ctx context.Context, observerPublicKey []byte) error
 	DeleteRegionIATAsNotIn(ctx context.Context, arg DeleteRegionIATAsNotInParams) error
 	DeleteRepeaterSource(ctx context.Context, source string) error
 	DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error
+	// A session has one device: registering a new token replaces the old one.
+	DeleteSessionDeviceOtherToken(ctx context.Context, arg DeleteSessionDeviceOtherTokenParams) error
 	// Dirty hours that can no longer be re-rolled.
 	DeleteStaleDirtyHours(ctx context.Context) error
+	// A sign-up nobody confirmed holds its username and address; once it is old and has no live verify link left it
+	// is removed so both can be used again. A disabled account is never removed here.
+	DeleteStaleUnverifiedUsers(ctx context.Context, arg DeleteStaleUnverifiedUsersParams) error
+	DeleteTelemetryRequest(ctx context.Context, id uuid.UUID) error
+	// Run in the Atlas write's transaction: a radio taken off the Atlas takes its rules with it.
+	DeleteUnpinnedAlertRules(ctx context.Context, userID uuid.UUID) error
+	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
+	DeleteUserAtlasPins(ctx context.Context, userID uuid.UUID) error
+	DeleteUserDevice(ctx context.Context, arg DeleteUserDeviceParams) error
+	DeleteUserIfHash(ctx context.Context, arg DeleteUserIfHashParams) (int64, error)
+	DeleteUserTokens(ctx context.Context, arg DeleteUserTokensParams) error
+	DeliveredAlertDevices(ctx context.Context, ids []int64) ([]DeliveredAlertDevicesRow, error)
+	// Telemetry requests that need attention and were not announced at this status, locked until the transaction ends.
+	DueRequestAttention(ctx context.Context) ([]DueRequestAttentionRow, error)
+	EndAllUserSessions(ctx context.Context, userID uuid.UUID) error
+	// Ends the live app sessions beyond the newest keep.
+	EndOldestAppSessions(ctx context.Context, arg EndOldestAppSessionsParams) error
+	EndOtherUserSessions(ctx context.Context, arg EndOtherUserSessionsParams) error
+	EndUserSession(ctx context.Context, arg EndUserSessionParams) error
+	EnsurePollingTarget(ctx context.Context, targetPublicKey []byte) error
+	// Creates the empty Atlas row (revision 0) so a first write has a row to lock.
+	EnsureUserAtlas(ctx context.Context, userID uuid.UUID) error
+	// Drops what was not delivered within its window, and what was delivered long ago.
+	ExpireAlertOutbox(ctx context.Context, arg ExpireAlertOutboxParams) (int64, error)
 	// Every site of every message in (after_id, through_id]: the backfill and the reconcile's message part.
 	FillChannelMessageIATAsByMessages(ctx context.Context, arg FillChannelMessageIATAsByMessagesParams) (int64, error)
 	// The site of every group-text observation in (after_id, through_id] whose packet has a message.
@@ -99,6 +211,7 @@ type Querier interface {
 	FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error
 	// The requested sites that have at least one row: a site with none adds no row to any site page.
 	FilterKnownSites(ctx context.Context, iatas []string) ([]string, error)
+	FinishAlertPass(ctx context.Context, passID uuid.UUID) error
 	// Marks the hour complete and bumps the revision only when its content changed.
 	FinishRollupHour(ctx context.Context, arg FinishRollupHourParams) (bool, error)
 	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
@@ -130,7 +243,8 @@ type Querier interface {
 	// adverts as (sender, forwarder) but traces as (receiver, sender). Callers normalise.
 	GetNeighborLinks(ctx context.Context, arg GetNeighborLinksParams) ([]GetNeighborLinksRow, error)
 	// Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
-	// the node's packets first heard in [@packet_from, @packet_until).
+	// the node's packets first heard in [@packet_from, @packet_until) and through its older packets heard again
+	// since @late_from. Each branch reads one range of an (origin_pubkey, time) index, and no packet is in both.
 	GetNodeActivityHourly(ctx context.Context, arg GetNodeActivityHourlyParams) ([]GetNodeActivityHourlyRow, error)
 	GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow, error)
 	GetNodeByPubkey(ctx context.Context, publicKey []byte) (uuid.UUID, error)
@@ -185,6 +299,8 @@ type Querier interface {
 	// The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
 	// (a NULL start makes generate_series return no rows).
 	GetPathStatsProbe(ctx context.Context, arg GetPathStatsProbeParams) ([]GetPathStatsProbeRow, error)
+	GetPollingState(ctx context.Context) (GetPollingStateRow, error)
+	GetPollingTarget(ctx context.Context, targetPublicKey []byte) (GetPollingTargetRow, error)
 	GetRadioPresets(ctx context.Context, arg GetRadioPresetsParams) ([]MvRadioPreset, error)
 	// The newest packet time retention has deleted; observations heard after it plus 30 minutes are all still stored.
 	GetRawDeletedBefore(ctx context.Context) (pgtype.Timestamptz, error)
@@ -246,9 +362,13 @@ type Querier interface {
 	GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
+	HasLivePollingCandidate(ctx context.Context, arg HasLivePollingCandidateParams) (bool, error)
 	// Whether any observation up to @max_id lacks a payload type. A full scan, run at most once per
 	// process by the payload-type backfill.
 	HasUntypedObservations(ctx context.Context, maxID int64) (bool, error)
+	// A rate-limited push waits until hold_until; no attempt is counted.
+	HoldAlertPush(ctx context.Context, arg HoldAlertPushParams) error
+	InsertAlertNotices(ctx context.Context, arg InsertAlertNoticesParams) error
 	// ============================================================
 	// CHANNEL MESSAGES
 	// ============================================================
@@ -272,6 +392,25 @@ type Querier interface {
 	// Inserts a telemetry snapshot for an observer. The reported_at timestamp should
 	// be truncated to the configured resolution before calling to ensure deduplication.
 	InsertObserverTelemetry(ctx context.Context, arg InsertObserverTelemetryParams) error
+	InsertPollingAdminStop(ctx context.Context, arg InsertPollingAdminStopParams) (int64, error)
+	InsertPollingAssignment(ctx context.Context, arg InsertPollingAssignmentParams) error
+	InsertPollingCandidate(ctx context.Context, arg InsertPollingCandidateParams) error
+	// Run under LockPollingObserver. Inserts nothing when this observer stored a reading of the target by the same
+	// method received after recent_after, or budget readings of any target received after budget_after.
+	InsertRepeaterReading(ctx context.Context, arg InsertRepeaterReadingParams) (int64, error)
+	InsertTelemetryRequest(ctx context.Context, arg InsertTelemetryRequestParams) error
+	InsertUserAtlasPin(ctx context.Context, arg InsertUserAtlasPinParams) error
+	// An observer that sent status since status_after, as in RequestNode.
+	IsObserverKey(ctx context.Context, arg IsObserverKeyParams) (bool, error)
+	IsPollerKey(ctx context.Context, observerPublicKey []byte) (bool, error)
+	// Newest trusted battery and temperature per polled node since a time, driven by polled targets, not all nodes.
+	// The received_at bound lets the BRIN index prune the history scan for readings of unassigned targets.
+	LatestNodeReadings(ctx context.Context, arg LatestNodeReadingsParams) ([]LatestNodeReadingsRow, error)
+	// The newest status reading before since: the baseline for the first counter increments in range.
+	LatestNodeStatusReadingBefore(ctx context.Context, arg LatestNodeStatusReadingBeforeParams) ([]LatestNodeStatusReadingBeforeRow, error)
+	// The data of the user's newest unused token of a kind, even if it has expired (cleanup keeps it for a week), for
+	// repeating a mail without minting from anything else.
+	LatestUserToken(ctx context.Context, arg LatestUserTokenParams) ([]byte, error)
 	ListAccounts(ctx context.Context) ([]Account, error)
 	// The original all-channel message statement, before the channel read model: no page runs it
 	// (planpolicy.VerificationOnly); tests compare message pages with it.
@@ -359,11 +498,14 @@ type Querier interface {
 	// Used for WS reconnect backfill.
 	ListMessagesAfterID(ctx context.Context, arg ListMessagesAfterIDParams) ([]ListMessagesAfterIDRow, error)
 	ListMissingRollupHours(ctx context.Context, limit int32) ([]pgtype.Timestamptz, error)
+	ListNoPasswordBlocked(ctx context.Context) ([][]byte, error)
 	// Newest packet first (first_heard_at, then hash), then its newest observation: walks idx_packets_origin and
 	// probes each packet's observations, so a page costs its own rows, not the node's history.
 	// @cursor is the previous page's last observation id (0 starts at the top); its packet gives its place in this
 	// order. A cursor whose observation is gone matches nothing, which ends the list.
 	ListNodeObservations(ctx context.Context, arg ListNodeObservationsParams) ([]ListNodeObservationsRow, error)
+	// Readings of one target in [since, until) ascending; until is open when NULL. Untrusted ones only when asked for.
+	ListNodeReadings(ctx context.Context, arg ListNodeReadingsParams) ([]ListNodeReadingsRow, error)
 	// Limit the filtered node page before enriching IATA membership and neighbours.
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
 	// ListNodes by name, type, neighbour count or last seen, keyset-paged, in the web table's order: unnamed
@@ -379,8 +521,14 @@ type Querier interface {
 	// $13..$18 are the ingest process's live counts (obscount): for an hour from $13 on, the whole
 	// minutes before $14 come from the counts and only [$14, slice end) is read raw.
 	ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error)
+	// The observer's requested assignments to other targets that are still requested, with the age of each target's
+	// oldest request, oldest first. A withdrawn target's assignment waits for its own election and holds no seat.
+	ListObserverRequestedSeats(ctx context.Context, arg ListObserverRequestedSeatsParams) ([]ListObserverRequestedSeatsRow, error)
 	// Observers newest last_seen first; the cursor is the (last_seen, id) of the last row.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)
+	// Targets with an assignment whose candidate is gone. A requested assignment is kept while its observer's claim
+	// accepts requests: it is made before the device lists the target, and the claim rows of an expired claim are gone.
+	ListOrphanPollingTargets(ctx context.Context) ([][]byte, error)
 	// The sites with the most packets among observations above after_id; the first-time verification pages them.
 	ListPacketSiteSamples(ctx context.Context, arg ListPacketSiteSamplesParams) ([]ListPacketSiteSamplesRow, error)
 	// Returns packets with observations after the given observation ID, ordered oldest first.
@@ -450,6 +598,14 @@ type Querier interface {
 	ListPacketsWindow(ctx context.Context, arg ListPacketsWindowParams) ([]ListPacketsWindowRow, error)
 	// ListPacketsWindow with branch 1 run once per named scope and branch 2 limited to those scopes.
 	ListPacketsWindowScoped(ctx context.Context, arg ListPacketsWindowScopedParams) ([]ListPacketsWindowScopedRow, error)
+	ListPollingAdminStops(ctx context.Context) ([]PollingAdminStop, error)
+	// Evidence: zero-hop adverts of the target this observer heard since $3, with missing signal (0/0) left out. mean_snr is 0 when n is 0.
+	ListPollingCandidates(ctx context.Context, arg ListPollingCandidatesParams) ([]ListPollingCandidatesRow, error)
+	ListPollingObservers(ctx context.Context) ([]PollingObserver, error)
+	// A target with only expired claims is still listed while it has assignment rows, so the caller can clear them. A
+	// requested target is always listed, so its requests move between waiting and active. An observer that sent status
+	// since status_after is never polled, so a claim alone does not list one; leftover assignments still do, to clear them.
+	ListPollingTargets(ctx context.Context, arg ListPollingTargetsParams) ([][]byte, error)
 	// Every region with its members, for reconciling imported MeshMapper groups.
 	ListRegionState(ctx context.Context) ([]ListRegionStateRow, error)
 	// ============================================================
@@ -458,11 +614,30 @@ type Querier interface {
 	// Each region with its detail and member IATAs, so clients resolve every region in one call.
 	ListRegions(ctx context.Context) ([]ListRegionsRow, error)
 	ListRepeaterSources(ctx context.Context) ([]MeshmapperRepeaterSource, error)
+	// Observers that could take a requested target: a live claim that accepts requests and zero-hop advert evidence for
+	// the target since first_heard_at (missing signal 0/0 left out). They need not name the target in their claim: a
+	// device learns of a requested target from the owners answer. held counts the requested targets the claim names;
+	// seats_elsewhere counts this observer's requested assignments to other still-requested targets whose oldest request
+	// is older than this target's, so seats go to the oldest requests first.
+	ListRequestCandidates(ctx context.Context, arg ListRequestCandidatesParams) ([]ListRequestCandidatesRow, error)
+	// The observers whose claim accepts requests, in key order, which is the order their seat locks are taken in.
+	ListRequestObserverKeys(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error)
+	// The targets that hold a requested assignment of any of the observers: the ones a seat decision may take a seat
+	// from, locked with the election in key order.
+	ListRequestedAssignedTargets(ctx context.Context, observers [][]byte) ([][]byte, error)
+	// When each observer handed this target as a requested one stored its newest trusted reading of it.
+	ListRequestedAssigneeReadings(ctx context.Context, targetPublicKey []byte) ([]ListRequestedAssigneeReadingsRow, error)
+	// The observers handed this target as a requested one, with their rank (0 polls).
+	ListRequestedAssignees(ctx context.Context, targetPublicKey []byte) ([]ListRequestedAssigneesRow, error)
 	// Leading index equalities and the time/ID boundary bound both custom and generic plans.
 	// Full-byte equality is required even when the compact digest matches. TRACE path bytes
 	// carry readings; unclassified legacy observations cannot be safely called ordinary paths.
 	ListRouteEvidence(ctx context.Context, arg ListRouteEvidenceParams) ([]ListRouteEvidenceRow, error)
 	ListScopeCatalogues(ctx context.Context) ([]MeshmapperScopeCatalogue, error)
+	ListTargetAdminStops(ctx context.Context, targetPublicKey []byte) ([][]byte, error)
+	ListTargetOtherStates(ctx context.Context, targetPublicKey []byte) ([]ListTargetOtherStatesRow, error)
+	ListTargetRequests(ctx context.Context, targetPublicKey []byte) ([]ListTargetRequestsRow, error)
+	ListTargetServedVersions(ctx context.Context, targetPublicKey []byte) ([]ListTargetServedVersionsRow, error)
 	// ============================================================
 	// TRACES
 	// ============================================================
@@ -475,49 +650,140 @@ type Querier interface {
 	ListUndecryptedGroupTextPackets(ctx context.Context) ([]ListUndecryptedGroupTextPacketsRow, error)
 	// Like ListUndecryptedGroupTextPackets, limited to channels that just gained a key.
 	ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ListUndecryptedGroupTextPacketsByHashRow, error)
+	ListUserAlertRules(ctx context.Context, userID uuid.UUID) ([]ListUserAlertRulesRow, error)
+	ListUserAtlasPins(ctx context.Context, userID uuid.UUID) ([]ListUserAtlasPinsRow, error)
+	ListUserSessions(ctx context.Context, arg ListUserSessionsParams) ([]ListUserSessionsRow, error)
+	// A user's requests, oldest first, with the node's current id and name, the observer that polls the repeater and
+	// the newest trusted reading. No password column is read; poller_id is the nil uuid when nobody polls it. The
+	// poller's own claim is live when received after received_after: poller_claim_at is null without one, and
+	// poller_claimed says whether that claim lists the repeater (poller_state is its state then).
+	ListUserTelemetryRequests(ctx context.Context, arg ListUserTelemetryRequestsParams) ([]ListUserTelemetryRequestsRow, error)
+	// search is a LIKE pattern with its wildcards already escaped, or empty for everyone. The cursor is the last row of
+	// the previous page; the first page passes a far-future time and the max uuid.
+	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 	ListZoneBoundaries(ctx context.Context) ([]MeshmapperZoneBoundary, error)
 	ListZoneLists(ctx context.Context) ([]MeshmapperZoneList, error)
+	LiveUserDevices(ctx context.Context, userIds []uuid.UUID) ([]LiveUserDevicesRow, error)
+	// Serializes one observer's reading inserts until the transaction ends, so its rate and budget checks see each
+	// other. Class 25191, beside the target class and the (25189, n) job locks.
+	LockPollingObserver(ctx context.Context, observerPublicKey []byte) error
+	// Serializes the seat decisions of one observer until the transaction ends. Class 25192, beside the target class
+	// (25190) and the reading-insert class (25191). Taken before the target lock, in key order, so two elections
+	// cannot wait on each other.
+	LockPollingSeats(ctx context.Context, observerPublicKey []byte) error
+	// Serializes elections of one target until the transaction ends. Class 25190 in the two-key space, which never
+	// meets the one-key migration lock; the schema keeps instances in other schemas apart.
+	LockPollingTarget(ctx context.Context, targetPublicKey []byte) error
 	// Returns the hour's status, or 'partial' if raw deletion has reached it since registration.
 	LockRollupHour(ctx context.Context, hour pgtype.Timestamptz) (string, error)
+	LockUserAtlas(ctx context.Context, userID uuid.UUID) (LockUserAtlasRow, error)
+	// Serializes session issuance and credential changes of one user until the transaction ends. NO KEY UPDATE keeps
+	// the foreign-key checks of unrelated inserts (Atlas, requests) from waiting on it.
+	LockUserCredentials(ctx context.Context, id uuid.UUID) (LockUserCredentialsRow, error)
+	// Serializes one user's request creation (the limit) without blocking the foreign-key checks on their rows.
+	LockUserForRequests(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	MarkAlertDeviceDelivered(ctx context.Context, arg MarkAlertDeviceDeliveredParams) error
+	// A notice is delivered once both channels are done.
+	MarkAlertsDelivered(ctx context.Context, arg MarkAlertsDeliveredParams) error
+	// The mail went out (sent_at set) or none was needed.
+	MarkAlertsEmailDone(ctx context.Context, arg MarkAlertsEmailDoneParams) error
+	MarkAlertsPushDone(ctx context.Context, arg MarkAlertsPushDoneParams) error
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
 	// Readers report the new status, so the revision moves too.
 	MarkPartialRollupHours(ctx context.Context) error
+	MarkRequestAttention(ctx context.Context, arg MarkRequestAttentionParams) error
 	MaxChannelMessageID(ctx context.Context) (int64, error)
 	MaxObservationID(ctx context.Context) (int64, error)
 	MinObservationID(ctx context.Context) (int64, error)
 	// The first message id above after_id, or 0 when there is none.
 	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
+	NodeHasReadings(ctx context.Context, targetPublicKey []byte) (bool, error)
+	NodeIDsByKeys(ctx context.Context, dollar_1 [][]byte) ([]NodeIDsByKeysRow, error)
+	NodeLatestTrustedReadingAt(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error)
+	// Assigned observers of one target by rank. An assignment whose observer has no row is left out.
+	NodePollingAssignments(ctx context.Context, targetPublicKey []byte) ([]NodePollingAssignmentsRow, error)
+	NodePublicKey(ctx context.Context, id uuid.UUID) ([]byte, error)
 	// The id skip + 1 observations above after_id: (after_id, id] holds exactly skip + 1 of them. 0 when fewer remain.
 	ObservationIDAbove(ctx context.Context, arg ObservationIDAboveParams) (int64, error)
 	// The id that bounds the newest n observations at or below through_id from below: (id, through_id] holds exactly n
 	// of them. 0 when fewer than n + 1 remain.
 	ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error)
+	ObserverIDsByKeys(ctx context.Context, dollar_1 [][]byte) ([]ObserverIDsByKeysRow, error)
+	ObserverKeysByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]ObserverKeysByIDsRow, error)
+	// Targets with a waiting or active request that are observers which sent status since status_after.
+	ObserverRequestTargets(ctx context.Context, statusAfter pgtype.Timestamptz) ([][]byte, error)
+	// Targets with a waiting or active request whose node no observer has heard since cutoff and whose newest such
+	// request was enabled before it. Requests with no node row count from the enabling alone.
+	OfflineRequestTargets(ctx context.Context, cutoff pgtype.Timestamptz) ([][]byte, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
+	OldestTargetRequest(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error)
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
+	// Who a live token belongs to, without using it.
+	PeekUserToken(ctx context.Context, arg PeekUserTokenParams) (uuid.UUID, error)
+	// Notices of a finished pass (or one that started before pass_timeout_before and never finished) only, with a channel
+	// that is not done and is due, and whole user and pass groups only, so one pass's notices for a user stay in one mail:
+	// groups are taken in order while the running total stays within row_limit, and the first group is taken whatever
+	// its size. email_due and push_due say which channels to try.
+	PendingAlerts(ctx context.Context, arg PendingAlertsParams) ([]PendingAlertsRow, error)
+	PollingAdminRequestCounts(ctx context.Context, targets [][]byte) ([]PollingAdminRequestCountsRow, error)
+	// Each live candidate and each assigned observer of the given targets. rank is -1 for an unassigned candidate.
+	// Claim fields come only from a live claim, so an assignment left over from an expired one shows them empty.
+	PollingAdminTargetRows(ctx context.Context, arg PollingAdminTargetRowsParams) ([]PollingAdminTargetRowsRow, error)
+	// Targets with a live candidate or any assignment row, newest claim first. latest_trusted uses the owners rule.
+	PollingAdminTargets(ctx context.Context, arg PollingAdminTargetsParams) ([]PollingAdminTargetsRow, error)
+	PollingClaimReceivedAt(ctx context.Context, observerPublicKey []byte) (pgtype.Timestamptz, error)
+	PollingElectionUnlock(ctx context.Context) error
+	PollingObserverFlags(ctx context.Context, observerPublicKey []byte) (PollingObserverFlagsRow, error)
+	// assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer with
+	// advert evidence (the newest per assignee, then the newest of those), so an observer Beacon has never heard the repeater through cannot stand others down. A target the
+	// observer was handed as a requested one is listed even before its claim names it (that is how it learns of it);
+	// claimed_requested is true when the claim names it as requested; target_requested when a request is in use for it.
+	// accepts_requests and request_slots are the claim's, for polling.OfferSeats. The observer's flags and the password
+	// in use come from the same statement, so an answer never pairs a password with an approval it did not exist under.
+	// The password is only read for a requested assignment of an unblocked observer whose claim accepts requests.
+	PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsParams) ([]PollingOwnerRowsRow, error)
+	PollingTargetExists(ctx context.Context, targetPublicKey []byte) (bool, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
 	// Drops imports for IATAs no longer configured, so their manual border returns.
 	PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error)
+	// The header and the pins in one statement, so they come from one snapshot. A user with no Atlas gets no rows.
+	ReadUserAtlas(ctx context.Context, userID uuid.UUID) ([]ReadUserAtlasRow, error)
 	// Delete node_neighbors where the neighbor has departed from node_short_ids
 	// for that IATA, or where its prefix_4 is now ambiguous.
+	// Check each distinct regional neighbor once. Keep the one-row lookup correlated:
+	// a flattened anti-join can rescan the whole identity catalogue for each edge.
 	ReconfirmNeighbors(ctx context.Context) error
 	// The next batch_size routes after the cursor in pkey order: deletes those with a departed hop
 	// node or a hop prefix matching >1 node in that IATA (length-aware, reconfirm_amb). Writes no stamp.
 	// The DELETE re-checks the newest row version. An empty last_iata means the walk passed the end.
 	ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error)
-	// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
+	// Count the bounded slice and return its last key. A short slice ends the cycle.
 	ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error)
+	// Keep 16 adverts, including the INSERT's row. Sibling CTEs share a snapshot:
+	// the table scan alone cannot see the new row. A conflict returns no extra row.
+	RecordClockDrift(ctx context.Context, arg RecordClockDriftParams) error
+	// Written on every owners answer that lists the target, so it only touches the row when the version changed or the
+	// last write is an hour old.
+	RecordServedVersion(ctx context.Context, arg RecordServedVersionParams) error
 	// One hearing of a TRACE packet: trace_iatas refreshes at most hourly and the tag's heard
 	// window widens (the first hearing replaces the packet's provisional times). Packet counts
 	// and payloads come from UpsertPacket.
 	RecordTrace(ctx context.Context, arg RecordTraceParams) error
+	RefreshPortalUser(ctx context.Context, arg RefreshPortalUserParams) (User, error)
 	RefreshRadioPresets(ctx context.Context) error
 	// Adds a 'missing' row for every eligible hour since the earliest retained observation
 	// (and not before @since), zero-observation hours included.
 	// No observations yet means nothing to register (GREATEST would ignore the NULL MIN).
 	RegisterRollupHours(ctx context.Context, since pgtype.Timestamptz) error
+	// Stores the same password under a newer hash, only while the hash is still the one that was verified.
+	RehashUserPassword(ctx context.Context, arg RehashUserPasswordParams) (int64, error)
 	// rows is a JSON array of {"key": hex, "data": {...}}; unchanged rows are not rewritten.
 	// fetchedAt comes from the source's checked_at when read.
 	ReplaceRepeaters(ctx context.Context, arg ReplaceRepeatersParams) error
+	// An observer counts only while it sends status (status_after): rows are never deleted and a status can be spoofed.
+	RequestNode(ctx context.Context, arg RequestNodeParams) (RequestNodeRow, error)
+	// A request that is fine again can be announced again the next time it needs attention.
+	ResetRequestAttention(ctx context.Context) error
 	// Batch form of ResolveEndpointHashes for a page of packets. Matches the cross
 	// product of IATAs and hashes; callers pick out the pairs they asked for.
 	ResolveEndpointHashPairs(ctx context.Context, arg ResolveEndpointHashPairsParams) ([]ResolveEndpointHashPairsRow, error)
@@ -594,7 +860,14 @@ type Querier interface {
 	SetNodeMultibytePaths(ctx context.Context, id uuid.UUID) error
 	SetNodeMultibyteTraces(ctx context.Context, id uuid.UUID) error
 	SetPacketDecrypted(ctx context.Context, packetHash []byte) error
+	SetPollingObserver(ctx context.Context, arg SetPollingObserverParams) error
+	SetPollingState(ctx context.Context, arg SetPollingStateParams) error
 	SetRollupHourPartial(ctx context.Context, hour pgtype.Timestamptz) error
+	SetUserAlertChannels(ctx context.Context, arg SetUserAlertChannelsParams) (int64, error)
+	SetUserDisabled(ctx context.Context, arg SetUserDisabledParams) (int64, error)
+	SetUserEmailVerified(ctx context.Context, arg SetUserEmailVerifiedParams) (int64, error)
+	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) (int64, error)
+	SetUserPendingEmail(ctx context.Context, arg SetUserPendingEmailParams) (int64, error)
 	// Read-only. Visits, through each time-ordered packet_sites index, every entry whose key was written in the last
 	// lookback (2 minutes). An index scan that reaches an entry whose heap tuple is dead to every snapshot sets the
 	// entry's LP_DEAD hint; when that leaf later fills, the inserting backend deletes hinted entries instead of splitting
@@ -602,6 +875,11 @@ type Querier interface {
 	// The ORDER BY ... LIMIT keeps every lateral a per-front index range scan (never flattened into a join).
 	// The cap is far above any front's 2-minute volume (the busiest site: about 150 entries) and only bounds the gauge.
 	SweepPacketSitesFronts(ctx context.Context, lookback pgtype.Interval) (SweepPacketSitesFrontsRow, error)
+	// ObserverRequestTargets for one target, asked again under the target's lock.
+	TargetStillObserverRequested(ctx context.Context, arg TargetStillObserverRequestedParams) (bool, error)
+	// OfflineRequestTargets for one target, asked again under the target's lock before its requests are disabled.
+	TargetStillOffline(ctx context.Context, arg TargetStillOfflineParams) (bool, error)
+	TelemetryRequestTarget(ctx context.Context, arg TelemetryRequestTargetParams) ([]byte, error)
 	// Write-through for a cached keyed channel: the UpsertChannel conflict update, by id.
 	// No row (deleted or re-keyed since cached) sends the caller back to UpsertChannel.
 	TouchChannel(ctx context.Context, arg TouchChannelParams) (int32, error)
@@ -612,19 +890,32 @@ type Querier interface {
 	// from regressing a newer write-through (e.g. a status update).
 	TouchObservers(ctx context.Context, arg TouchObserversParams) error
 	TouchPackets(ctx context.Context, arg TouchPacketsParams) error
+	TouchPollingOtherState(ctx context.Context, arg TouchPollingOtherStateParams) error
+	TouchUserLogin(ctx context.Context, arg TouchUserLoginParams) (int64, error)
+	TouchUserSession(ctx context.Context, arg TouchUserSessionParams) (int64, error)
 	// Page keys straight from the observations, independent of packet_sites. floor_ts bounds the read: keys at or
 	// above it are exact, because a packet's newest requested-site hearing is unchanged by dropping older ones.
 	TruthPacketsBySitesPage(ctx context.Context, arg TruthPacketsBySitesPageParams) ([]TruthPacketsBySitesPageRow, error)
+	TryAlertsEvalLock(ctx context.Context) (bool, error)
+	TryAlertsSendLock(ctx context.Context) (bool, error)
+	TryPollingElectionLock(ctx context.Context) (bool, error)
 	// ============================================================
 	// HOURLY ANALYTICS ROLLUPS
 	// An hour [H, H+1h) is eligible once now() >= H + 95 min (ingest clamps heard_at to ±30 min).
 	// ============================================================
 	TryRollupLock(ctx context.Context) (bool, error)
+	TurnOnAlertPush(ctx context.Context, id uuid.UUID) error
 	// Records the observer's own OTA-reported region scope, from the "self"
 	// field of a /neighbors report. Always known (not queried OTA), so this
 	// unconditionally overwrites, unlike the neighbor-side region_scope.
 	UpdateObserverRegionScope(ctx context.Context, arg UpdateObserverRegionScopeParams) error
 	UpdateObserverStatus(ctx context.Context, arg UpdateObserverStatusParams) (uuid.UUID, error)
+	UpdatePollingTarget(ctx context.Context, arg UpdatePollingTargetParams) error
+	UpdateTelemetryRequest(ctx context.Context, arg UpdateTelemetryRequestParams) error
+	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (int64, error)
+	// A change of thresholds, or turning a rule on, starts its state again: no stale notification, and the data the
+	// evaluator looks at starts now.
+	UpsertAlertRule(ctx context.Context, arg UpsertAlertRuleParams) (UpsertAlertRuleRow, error)
 	UpsertBackgroundState(ctx context.Context, arg UpsertBackgroundStateParams) error
 	// ============================================================
 	// CHANNELS
@@ -695,11 +986,30 @@ type Querier interface {
 	// A new TRACE packet adds itself to its tag summary in the same statement, so the summary
 	// can't miss a stored packet. 'TRACE' > 'PING'; the longest path keeps the best payload.
 	UpsertPacket(ctx context.Context, arg UpsertPacketParams) (UpsertPacketRow, error)
+	// Applies only a claim newer than the stored one and received at least the claim interval after it, checked in
+	// this statement so concurrent claims cannot both pass. Zero rows means it was ignored.
+	UpsertPollingClaim(ctx context.Context, arg UpsertPollingClaimParams) (int64, error)
 	UpsertRegion(ctx context.Context, arg UpsertRegionParams) (int32, error)
 	// ============================================================
 	// TRANSPORT CODES
 	// ============================================================
 	UpsertTransportScope(ctx context.Context, arg UpsertTransportScopeParams) error
+	// The handle is unique, so a registration for a handle another session holds moves that row (crossing users on
+	// purpose: a phone belongs to one account, so the previous user's alerts never reach its next user).
+	UpsertUserDevice(ctx context.Context, arg UpsertUserDeviceParams) error
+	UserAlertChannels(ctx context.Context, id uuid.UUID) (UserAlertChannelsRow, error)
+	// Only enabled rules: back_online needs a gone_quiet rule that is on.
+	UserAlertRuleKinds(ctx context.Context, arg UserAlertRuleKindsParams) ([]string, error)
+	UserByEmail(ctx context.Context, email string) (User, error)
+	UserByID(ctx context.Context, id uuid.UUID) (User, error)
+	UserByProviderSubject(ctx context.Context, arg UserByProviderSubjectParams) (User, error)
+	UserByUsername(ctx context.Context, lower string) (User, error)
+	UserHasAtlasPin(ctx context.Context, arg UserHasAtlasPinParams) (bool, error)
+	UserHasLiveDevice(ctx context.Context, userID uuid.UUID) (bool, error)
+	UserRequestTargets(ctx context.Context, userID uuid.UUID) ([][]byte, error)
+	// A session is live when it is not ended, not past either expiry, and its user is not disabled.
+	UserSessionByTokenHash(ctx context.Context, arg UserSessionByTokenHashParams) (UserSessionByTokenHashRow, error)
+	UserSessionLive(ctx context.Context, arg UserSessionLiveParams) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)

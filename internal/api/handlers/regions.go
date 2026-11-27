@@ -183,6 +183,23 @@ func parseCSVOrSingle(r *http.Request, pluralParam, singularParam string) []stri
 	return out
 }
 
+// Measurement IATA columns are character(3). Four non-space characters cannot match even
+// legacy blank/unknown IATA rows, unlike the empty string. Readers preserve the
+// value as bpchar[] without truncating it to character(3).
+const emptyRegionIATA = "----"
+
+// appendRegionIATAs combines explicit IATAs with a selected region, keeping an
+// empty selection distinct from the unfiltered nil/[] reader convention. It
+// retains normal reader readiness/error handling and response envelopes.
+// Call only when a region filter was supplied.
+func appendRegionIATAs(iatas, members []string) []string {
+	iatas = append(iatas, members...)
+	if len(iatas) == 0 {
+		return []string{emptyRegionIATA}
+	}
+	return iatas
+}
+
 // resolveRegionIATAs expands a regionId or region slug to a slice of IATA codes.
 func resolveRegionIATAs(ctx context.Context, regionID, regionSlug string, reader api.Reader) ([]string, error) {
 	var region *api.Region

@@ -294,6 +294,8 @@ func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Rea
 			}
 			iatas = append(iatas, region.IATAs...)
 		}
+		// The hub reads no IATAs as every IATA, so regions that gave none must match nothing.
+		matchNothing := len(iatas) == 0 && len(msg.Scope.RegionIDs)+len(msg.Scope.RegionSlugs) > 0
 		scope := hub.Scope{
 			IATAs:         iatas,
 			PayloadTypes:  msg.Scope.PayloadTypes,
@@ -303,7 +305,11 @@ func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Rea
 			Events:        msg.Scope.Events,
 		}
 		subID := uuid.NewString()
-		h.AddScope(client, subID, scope)
+		if matchNothing {
+			slog.Warn(fmt.Sprintf("ws[%s]: subscribed regions have no IATAs, sending nothing", connID), "component", "ws")
+		} else {
+			h.AddScope(client, subID, scope)
+		}
 		reply, _ := json.Marshal(map[string]any{
 			"v": 1, "type": "subscribed", "id": msg.ID, "subscriptionId": subID,
 		})

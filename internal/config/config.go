@@ -54,6 +54,12 @@ type Config struct {
 	Guards      GuardsConfig          `yaml:"guards"`
 	Planguard   PlanguardConfig       `yaml:"planguard"`
 	ReadModels  ReadModelsConfig      `yaml:"readmodels"`
+	Polling     PollingConfig         `yaml:"polling"`
+	Mail        MailConfig            `yaml:"mail"`
+	Accounts    AccountsConfig        `yaml:"accounts"`
+	Alerts      AlertsConfig          `yaml:"alerts"`
+	Display     DisplayConfig         `yaml:"display"`
+	Atlas       AtlasConfig           `yaml:"atlas"`
 }
 
 // ReadModelsConfig switches serving pages from each read model and paces their one-off backfills.
@@ -528,9 +534,9 @@ type RegionConfig struct {
 }
 
 // IngestFilterConfig restricts which packets Beacon stores based on the
-// observer's IATA geographic location. Both filters are optional — if neither
-// is set all IATAs are accepted. If both are set an IATA passes if it matches
-// either (OR semantics).
+// observer's IATA geographic location. Every filter is optional — if none
+// is set all IATAs are accepted. An IATA passes if it matches any of them
+// (OR semantics).
 //
 // Country codes are ISO 3166-1 alpha-2 (e.g. "CA", "US").
 // Continent codes are two-letter OurAirports codes: AF, AN, AS, EU, NA, OC, SA.
@@ -542,6 +548,23 @@ type IngestFilterConfig struct {
 	// AllowContinents is a list of continent codes to accept.
 	// Packets from observers in other continents are dropped at ingest.
 	AllowContinents []string `yaml:"allow_continents"`
+
+	// AllowIATAs is a list of single IATA codes to accept on top of the
+	// countries and continents, for example one region across a border.
+	AllowIATAs []string `yaml:"allow_iatas"`
+}
+
+// validateIngest normalises allow_iatas to upper case and rejects anything
+// that is not a three-letter code, since a typo would silently match nothing.
+func (c *Config) validateIngest() error {
+	for i, raw := range c.Ingest.AllowIATAs {
+		code := strings.ToUpper(strings.TrimSpace(raw))
+		if len(code) != 3 || strings.Trim(code, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") != "" {
+			return fmt.Errorf("config: ingest.allow_iatas entry %q must be a three-letter IATA code", raw)
+		}
+		c.Ingest.AllowIATAs[i] = code
+	}
+	return nil
 }
 
 // Load reads and parses the config file at path.
@@ -564,6 +587,7 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	cfg.Accounts.Mail = cfg.Mail
 	if value, set := os.LookupEnv("BEACON_API_KEY"); set {
 		cfg.Auth.APIKey = value
 	}
@@ -615,6 +639,9 @@ func Load(path string) (*Config, error) {
 	if err := cfg.validateScopes(); err != nil {
 		return nil, err
 	}
+	if err := cfg.validateIngest(); err != nil {
+		return nil, err
+	}
 	if err := cfg.validateClientVersions(); err != nil {
 		return nil, err
 	}
@@ -634,6 +661,21 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := cfg.ReadModels.Fill.validate(); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.Polling.Resolve(); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.Display.Resolve(); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.Atlas.Resolve(); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.Accounts.Resolve(""); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.Alerts.Resolve(cfg.Accounts.Mode); err != nil {
 		return nil, err
 	}
 	return cfg, nil

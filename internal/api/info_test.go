@@ -41,7 +41,7 @@ func TestAppFloor(t *testing.T) {
 		want          string
 	}{
 		{"", false, MinAppVersion},
-		{"", true, TicketAppVersion},
+		{"", true, HigherVersion(MinAppVersion, TicketAppVersion)},
 		{"9.0.0", true, "9.0.0"},
 		{"9.0.0", false, "9.0.0"},
 	} {

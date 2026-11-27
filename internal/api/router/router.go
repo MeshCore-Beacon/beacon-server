@@ -8,6 +8,7 @@ package router
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -15,6 +16,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	mw "github.com/MeshCore-Beacon/beacon-server/internal/api/middleware"
+	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
@@ -28,6 +30,8 @@ import (
 // Route shape:
 //
 //	/ws                → WebSocket (public in v1)
+//	/api/guest-polling → observer firmware policy and owners (GET)
+//	/api/guest-keys, /api/shared-guest/key → retired, 404
 //	/api/v1/           → public group
 //	  /info            → server info and minimum client versions
 //	  /ws-ticket       → ticket that opens /ws without an Origin
@@ -39,6 +43,7 @@ import (
 //	  /iatas           → iatas subrouter
 //	  /regions         → regions subrouter
 //	  /stats           → stats subrouter
+//	  /auth, /me       → sign-in and profile (404 accounts_disabled unless accounts are on)
 //
 // Admin endpoints require a configured bearer key.
 func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) http.Handler {
@@ -76,7 +81,30 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		Mobile: api.AdminMobileConfig{MinAppVersion: opts.MinAppVersion},
 		Web:    api.AdminWebConfig{MinWebVersion: opts.MinWebVersion},
 	}
-	info := api.Info{ServerVersion: opts.ServerVersion}
+	features := api.InfoFeatures{Polling: opts.PollingEnabled, Accounts: "off", TelemetryRequests: opts.TelemetryRequests, AtlasTelemetry: true, Atlas7d: true, MapTelemetry: true, AppDeviceLabel: true}
+	switch opts.AccountsMode {
+	case "local":
+		features.Accounts, features.Registration = "local", opts.RegistrationOpen
+	case "portal":
+		features.Accounts, features.PortalURL = "portal", opts.PortalURL
+	}
+	features.AlertChannels = api.InfoAlertChannels{Email: opts.AlertEmail, Push: opts.AlertPush}
+	features.Alerts = opts.AlertEmail || opts.AlertPush
+	if opts.AlertPush {
+		features.Push = &api.InfoPush{Server: opts.PushServer, PushID: opts.PushID}
+	}
+	display := api.InfoDisplay{TemperatureUnit: "c", DistanceUnit: "metric"}
+	if opts.TemperatureUnit != "" {
+		display.TemperatureUnit = opts.TemperatureUnit
+	}
+	if opts.DistanceUnit != "" {
+		display.DistanceUnit = opts.DistanceUnit
+	}
+	limits := api.InfoLimits{Atlas: 20}
+	if opts.AtlasLimit > 0 {
+		limits.Atlas = opts.AtlasLimit
+	}
+	info := api.Info{ServerVersion: opts.ServerVersion, Features: features, Display: display, Limits: limits}
 	if opts.MinAppVersion != "" {
 		info.MinAppVersion = &opts.MinAppVersion
 	}
@@ -117,10 +145,29 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		SendBurstBytes:       opts.WSSendBurstBytes,
 	}, ws.Access{AllowedOrigins: opts.WSAllowedOrigins, RequireOrigin: opts.WSRequireOrigin, Tickets: tickets}))
 
+	// ── Observer firmware routes ─────────────────────────────────────────────
+	// Literal paths the firmware calls, on every instance whatever the config. They sit outside
+	// /api/v1 with their own limiter: 240/min covers well over a thousand devices behind one address.
+	r.Group(func(r chi.Router) {
+		r.Use(mw.RateLimit(config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 240, Burst: 240}))
+		r.Mount("/api/guest-polling", handlers.GuestPollingRouter(opts.GuestPolling))
+	})
+	// The push server checks this server's address here; it exists only while push is on.
+	if opts.AlertPush && opts.PushID != "" && opts.PushSecret != "" {
+		r.With(mw.RateLimitRoute(30, time.Minute)).Get("/.well-known/beacon-push", handlers.PushDomainCheck(opts.PushID, opts.PushSecret))
+	}
+	// The retired key routes always answer 404: they do no work and never read the body, so they need no limiter.
+	r.Post("/api/guest-keys", handlers.GuestKeysGone())
+	r.Get("/api/shared-guest/key", handlers.GuestKeysGone())
+
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(mw.RateLimit(opts.RateLimit))
 		r.Use(mw.LimitListParams)
+		// Attaches the signed-in user, when there is one, for the /auth and /me routes.
+		if opts.Accounts != nil && opts.AuthOptions.Enabled {
+			r.Use(mw.UserAuth(opts.Accounts, handlers.SessionCookie))
+		}
 		// Public group — no authentication required. Guards run here only, after TrustedProxyIP,
 		// so /ws and the admin subtree never carry guard state.
 		r.Group(func(r chi.Router) {
@@ -128,7 +175,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 				r.Use(guards.Middleware(opts.Guards))
 			}
 			r.Mount("/packets", handlers.PacketsRouter(reader))
-			r.Mount("/nodes", handlers.NodesRouter(reader))
+			r.Mount("/nodes", handlers.NodesRouter(reader, opts.PollingEnabled))
 			r.Mount("/brokers", handlers.BrokersRouter(workers))
 			r.Mount("/observers", handlers.ObserversRouter(reader))
 			r.Mount("/channels", handlers.ChannelsRouter(reader))
@@ -141,6 +188,8 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 			r.Mount("/traces", handlers.TracesRouter(reader))
 			r.Mount("/info", handlers.InfoRouter(info))
 			r.Mount("/ws-ticket", handlers.WSTicketRouter(tickets))
+			r.Mount("/auth", handlers.AuthRouter(opts.Accounts, opts.AuthOptions))
+			r.Mount("/me", handlers.MeRouter(opts.Accounts, opts.AuthOptions, opts.MeMounts...))
 		})
 
 		// Protect the entire subtree, including its root and unknown paths.

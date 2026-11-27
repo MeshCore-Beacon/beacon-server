@@ -18,6 +18,39 @@ type Account struct {
 	DeactivatedAt pgtype.Timestamptz `json:"deactivated_at"`
 }
 
+type AlertOutbox struct {
+	ID                 int64              `json:"id"`
+	UserID             uuid.UUID          `json:"user_id"`
+	PassID             uuid.UUID          `json:"pass_id"`
+	TargetKind         string             `json:"target_kind"`
+	TargetPublicKey    []byte             `json:"target_public_key"`
+	Name               string             `json:"name"`
+	AlertKind          string             `json:"alert_kind"`
+	Value              *int64             `json:"value"`
+	Detail             string             `json:"detail"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	DeliveredAt        pgtype.Timestamptz `json:"delivered_at"`
+	EmailSentAt        pgtype.Timestamptz `json:"email_sent_at"`
+	EmailAttempts      int16              `json:"email_attempts"`
+	EmailNextAttemptAt pgtype.Timestamptz `json:"email_next_attempt_at"`
+	EmailDoneAt        pgtype.Timestamptz `json:"email_done_at"`
+	PushAttempts       int16              `json:"push_attempts"`
+	PushNextAttemptAt  pgtype.Timestamptz `json:"push_next_attempt_at"`
+	PushDoneAt         pgtype.Timestamptz `json:"push_done_at"`
+}
+
+type AlertOutboxDevice struct {
+	OutboxID    int64              `json:"outbox_id"`
+	SessionID   uuid.UUID          `json:"session_id"`
+	DeliveredAt pgtype.Timestamptz `json:"delivered_at"`
+}
+
+type AlertPass struct {
+	PassID     uuid.UUID          `json:"pass_id"`
+	StartedAt  pgtype.Timestamptz `json:"started_at"`
+	FinishedAt pgtype.Timestamptz `json:"finished_at"`
+}
+
 type AnalyticsDirtyHour struct {
 	Hour       pgtype.Timestamptz `json:"hour"`
 	EnqueuedAt pgtype.Timestamptz `json:"enqueued_at"`
@@ -333,6 +366,13 @@ type Node struct {
 	RadioBwKhz              *float32           `json:"radio_bw_khz"`
 	Metadata                []byte             `json:"metadata"`
 	DeviceClockDriftSeconds *int64             `json:"device_clock_drift_seconds"`
+	PrevClockDriftSeconds   *int64             `json:"prev_clock_drift_seconds"`
+}
+
+type NodeClockDrift struct {
+	NodeID       uuid.UUID          `json:"node_id"`
+	AdvertAt     pgtype.Timestamptz `json:"advert_at"`
+	DriftSeconds int64              `json:"drift_seconds"`
 }
 
 type NodeIata struct {
@@ -492,6 +532,90 @@ type PacketSite struct {
 	ScopeID      *int32             `json:"scope_id"`
 }
 
+type PollingAdminStop struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	ReportedAt        pgtype.Timestamptz `json:"reported_at"`
+}
+
+type PollingAssignment struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	Rank              int16              `json:"rank"`
+	EvidenceSnr       *float32           `json:"evidence_snr"`
+	EvidenceCount     int32              `json:"evidence_count"`
+	AssignedAt        pgtype.Timestamptz `json:"assigned_at"`
+	Requested         bool               `json:"requested"`
+}
+
+type PollingCandidate struct {
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	KeyMode           string             `json:"key_mode"`
+	ClaimedSnr        *float32           `json:"claimed_snr"`
+	Requested         bool               `json:"requested"`
+	State             string             `json:"state"`
+	Misses            int16              `json:"misses"`
+	LastAttempt       pgtype.Timestamptz `json:"last_attempt"`
+	LastOk            pgtype.Timestamptz `json:"last_ok"`
+}
+
+type PollingClaim struct {
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	ObserverID        uuid.UUID          `json:"observer_id"`
+	Origin            string             `json:"origin"`
+	Client            string             `json:"client"`
+	PolicyVersion     string             `json:"policy_version"`
+	Community         bool               `json:"community"`
+	AcceptsRequests   bool               `json:"accepts_requests"`
+	RequestSlots      int16              `json:"request_slots"`
+	ClaimedAt         pgtype.Timestamptz `json:"claimed_at"`
+	ReceivedAt        pgtype.Timestamptz `json:"received_at"`
+}
+
+type PollingObserver struct {
+	ObserverPublicKey []byte `json:"observer_public_key"`
+	Blocked           bool   `json:"blocked"`
+	Approved          bool   `json:"approved"`
+	Note              string `json:"note"`
+}
+
+type PollingOtherState struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	SeenAt            pgtype.Timestamptz `json:"seen_at"`
+}
+
+type PollingServedVersion struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	Ver               int64              `json:"ver"`
+	ServedAt          pgtype.Timestamptz `json:"served_at"`
+}
+
+type PollingState struct {
+	ID            bool               `json:"id"`
+	Paused        bool               `json:"paused"`
+	PausedUntil   pgtype.Timestamptz `json:"paused_until"`
+	ExcludedNodes [][]byte           `json:"excluded_nodes"`
+}
+
+type PollingTarget struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ActiveRequestID   pgtype.UUID        `json:"active_request_id"`
+	Ver               int64              `json:"ver"`
+	VerChangedAt      pgtype.Timestamptz `json:"ver_changed_at"`
+	NoPasswordBlocked bool               `json:"no_password_blocked"`
+}
+
+type PortalState struct {
+	CookieHash []byte             `json:"cookie_hash"`
+	StateHash  []byte             `json:"state_hash"`
+	Verifier   string             `json:"verifier"`
+	ReturnPath string             `json:"return_path"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+}
+
 type ReconfirmAmb struct {
 	Iata   string `json:"iata"`
 	Len    int32  `json:"len"`
@@ -518,6 +642,42 @@ type RegionIata struct {
 	AddedAt  pgtype.Timestamptz `json:"added_at"`
 }
 
+type RepeaterReading struct {
+	ID                int64              `json:"id"`
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	ObserverID        pgtype.UUID        `json:"observer_id"`
+	SampledAt         pgtype.Timestamptz `json:"sampled_at"`
+	ReceivedAt        pgtype.Timestamptz `json:"received_at"`
+	Method            string             `json:"method"`
+	Tag               int64              `json:"tag"`
+	BatteryMv         *int32             `json:"battery_mv"`
+	TemperatureC      *float32           `json:"temperature_c"`
+	PollSnr           *float32           `json:"poll_snr"`
+	UptimeSecs        *int64             `json:"uptime_secs"`
+	PacketsRecv       *int64             `json:"packets_recv"`
+	PacketsSent       *int64             `json:"packets_sent"`
+	RecvFlood         *int64             `json:"recv_flood"`
+	RecvDirect        *int64             `json:"recv_direct"`
+	SentFlood         *int64             `json:"sent_flood"`
+	SentDirect        *int64             `json:"sent_direct"`
+	TxAirSecs         *int64             `json:"tx_air_secs"`
+	RxAirSecs         *int64             `json:"rx_air_secs"`
+	RecvErrors        *int64             `json:"recv_errors"`
+	NoiseFloor        *int32             `json:"noise_floor"`
+	LastRssi          *int32             `json:"last_rssi"`
+	TxQueue           *int32             `json:"tx_queue"`
+	FloodDups         *int32             `json:"flood_dups"`
+	DirectDups        *int32             `json:"direct_dups"`
+	ErrEvents         *int32             `json:"err_events"`
+	LastSnr           *float32           `json:"last_snr"`
+	Lpp               []byte             `json:"lpp"`
+	PacketHash        []byte             `json:"packet_hash"`
+	Corroborated      *int16             `json:"corroborated"`
+	Client            string             `json:"client"`
+	Trusted           bool               `json:"trusted"`
+}
+
 type RollupOb struct {
 	PacketHash     []byte             `json:"packet_hash"`
 	ObserverID     uuid.UUID          `json:"observer_id"`
@@ -534,6 +694,21 @@ type RollupOb struct {
 	RouteType      int16              `json:"route_type"`
 	OriginPubkey   []byte             `json:"origin_pubkey"`
 	ScopeID        *int32             `json:"scope_id"`
+}
+
+type TelemetryRequest struct {
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	TargetPublicKey []byte             `json:"target_public_key"`
+	Status          string             `json:"status"`
+	StatusReason    string             `json:"status_reason"`
+	PasswordCt      []byte             `json:"password_ct"`
+	PasswordNonce   []byte             `json:"password_nonce"`
+	PasswordFailed  bool               `json:"password_failed"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	EnabledAt       pgtype.Timestamptz `json:"enabled_at"`
+	AttentionStatus *string            `json:"attention_status"`
 }
 
 type TraceIata struct {
@@ -562,4 +737,92 @@ type TransportScope struct {
 	KeyFingerprint []byte             `json:"key_fingerprint"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	ImportedOnly   bool               `json:"imported_only"`
+}
+
+type User struct {
+	ID              uuid.UUID          `json:"id"`
+	Username        string             `json:"username"`
+	DisplayName     string             `json:"display_name"`
+	Email           string             `json:"email"`
+	PendingEmail    *string            `json:"pending_email"`
+	PassHash        string             `json:"pass_hash"`
+	EmailVerifiedAt pgtype.Timestamptz `json:"email_verified_at"`
+	Provider        string             `json:"provider"`
+	ProviderSubject *string            `json:"provider_subject"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	LastLoginAt     pgtype.Timestamptz `json:"last_login_at"`
+	DisabledAt      pgtype.Timestamptz `json:"disabled_at"`
+	AlertEmail      bool               `json:"alert_email"`
+	AlertPush       bool               `json:"alert_push"`
+}
+
+type UserAlertRule struct {
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	TargetKind      string             `json:"target_kind"`
+	TargetPublicKey []byte             `json:"target_public_key"`
+	Kind            string             `json:"kind"`
+	Threshold       *int32             `json:"threshold"`
+	ThresholdHigh   *int32             `json:"threshold_high"`
+	Enabled         bool               `json:"enabled"`
+	State           string             `json:"state"`
+	StateChangedAt  pgtype.Timestamptz `json:"state_changed_at"`
+	LastSentAt      pgtype.Timestamptz `json:"last_sent_at"`
+	CursorAt        pgtype.Timestamptz `json:"cursor_at"`
+	Streak          int16              `json:"streak"`
+	RecoveredAt     pgtype.Timestamptz `json:"recovered_at"`
+	Version         int64              `json:"version"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type UserAtla struct {
+	UserID    uuid.UUID          `json:"user_id"`
+	Range     string             `json:"range"`
+	Revision  int64              `json:"revision"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserAtlasPin struct {
+	UserID         uuid.UUID `json:"user_id"`
+	Position       int16     `json:"position"`
+	Kind           string    `json:"kind"`
+	PublicKey      []byte    `json:"public_key"`
+	Name           string    `json:"name"`
+	Tiles          []string  `json:"tiles"`
+	View           *string   `json:"view"`
+	TelemetryTiles []string  `json:"telemetry_tiles"`
+}
+
+type UserDevice struct {
+	SessionID  uuid.UUID          `json:"session_id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	Platform   string             `json:"platform"`
+	PushToken  string             `json:"push_token"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	PayloadKey []byte             `json:"payload_key"`
+}
+
+type UserSession struct {
+	ID            uuid.UUID          `json:"id"`
+	UserID        uuid.UUID          `json:"user_id"`
+	TokenHash     []byte             `json:"token_hash"`
+	Kind          string             `json:"kind"`
+	Label         string             `json:"label"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	LastUsedAt    pgtype.Timestamptz `json:"last_used_at"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	HardExpiresAt pgtype.Timestamptz `json:"hard_expires_at"`
+	EndedAt       pgtype.Timestamptz `json:"ended_at"`
+	Ip            string             `json:"ip"`
+	UserAgent     string             `json:"user_agent"`
+}
+
+type UserToken struct {
+	TokenHash []byte             `json:"token_hash"`
+	UserID    uuid.UUID          `json:"user_id"`
+	Kind      string             `json:"kind"`
+	Data      []byte             `json:"data"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
 }

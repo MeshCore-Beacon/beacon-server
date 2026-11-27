@@ -659,3 +659,28 @@ func TestLoad_ReadModelsFill(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadIngestAllowIATAs(t *testing.T) {
+	load := func(t *testing.T, yaml string) (*Config, error) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(yaml), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(path)
+	}
+	cfg, err := load(t, "ingest:\n  allow_countries: [CA]\n  allow_iatas: [pae, \" SEA \"]\n")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := cfg.Ingest.AllowIATAs; len(got) != 2 || got[0] != "PAE" || got[1] != "SEA" {
+		t.Fatalf("allow_iatas = %v, want [PAE SEA]", got)
+	}
+	for _, bad := range []string{"[PA]", "[PAEX]", "[P4E]", "[\"\"]"} {
+		if _, err := load(t, "ingest:\n  allow_iatas: "+bad+"\n"); err == nil {
+			t.Errorf("allow_iatas %s: expected an error", bad)
+		} else if !strings.Contains(err.Error(), "ingest.allow_iatas") {
+			t.Errorf("allow_iatas %s: error %q does not name the key", bad, err)
+		}
+	}
+}

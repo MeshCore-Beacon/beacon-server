@@ -57,15 +57,21 @@ func listKnownRoutes(reader api.Reader) http.HandlerFunc {
 		}
 		var hopCount int32
 		if v := r.URL.Query().Get("hopCount"); v != "" {
-			if h, err := strconv.ParseInt(v, 10, 32); err == nil {
-				hopCount = int32(h)
+			h, err := strconv.ParseInt(v, 10, 32)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "hopCount must be an integer")
+				return
 			}
+			hopCount = int32(h)
 		}
 		var cursor time.Time
 		if v := r.URL.Query().Get("cursor"); v != "" {
-			if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
-				cursor = time.UnixMilli(ms)
+			ms, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "cursor must be epoch milliseconds")
+				return
 			}
+			cursor = time.UnixMilli(ms)
 		}
 		// cursorId breaks ties within the cursor's millisecond.
 		var cursorID int64

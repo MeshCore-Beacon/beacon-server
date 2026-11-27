@@ -72,15 +72,24 @@ func isQueryTimeout(err error) bool {
 type APIError struct {
 	Code    string `json:"code"`    // e.g. "not_found", "bad_request"
 	Message string `json:"message"` // e.g. "channel not found"
+	// ReasonCode is a stable snake_case code for the reason behind the message, when the error has one
+	// (422 kind_unavailable); omitted otherwise.
+	ReasonCode string `json:"reasonCode,omitempty"`
 }
 
-// respond writes a JSON response with the given status code and data.
-// Logs if encoding fails since the header is already written at that point.
+// respond encodes before committing the status, so an unsupported value cannot
+// turn a serialization error into an empty success response.
 func respond(w http.ResponseWriter, status int, data any) {
+	body, err := json.Marshal(data)
+	if err != nil {
+		slog.Error("api: failed to encode response", "component", "api", "error", err)
+		status = http.StatusInternalServerError
+		body = []byte(`{"error":{"code":"internal_server_error","message":"Unable to return this response."}}`)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		slog.Error("api: failed to encode response", "component", "api", "error", err)
+	if _, err := w.Write(append(body, '\n')); err != nil {
+		slog.Error("api: failed to write response", "component", "api", "error", err)
 	}
 }
 

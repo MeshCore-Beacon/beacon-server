@@ -31,11 +31,11 @@ func (r *borderReader) GetNode(context.Context, uuid.UUID) (*api.Node, error) {
 	r.getCalls++
 	return r.node, r.err
 }
-func (r *borderReader) ListNodes(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+func (r *borderReader) ListNodes(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
 	r.listCalls++
 	return r.page, r.err
 }
-func (r *borderReader) ListNodesSorted(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
+func (r *borderReader) ListNodesSorted(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
 	r.listCalls++
 	return r.page, r.err
 }
@@ -72,14 +72,14 @@ func TestLocalBordersAfterCache(t *testing.T) {
 		if got.PossiblyForeign == nil || *got.PossiblyForeign != tc.want || got.IATAs[0].IATA != "ZZZ" {
 			t.Fatalf("detail: %+v", got)
 		}
-		page, err := tc.reader.ListNodes(ctx, 2, []string{"ZZZ"}, nil, nil, nil, "", "", "", 0, nil, 50, false)
+		page, err := tc.reader.ListNodes(ctx, 2, []string{"ZZZ"}, nil, nil, nil, nil, "", "", "", 0, nil, 50, false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !page.HasMore || *page.NextCursor != 123 || page.NextPageCursor == nil || *page.NextPageCursor != *base.page.NextPageCursor || page.Items[0].PossiblyForeign == nil || *page.Items[0].PossiblyForeign != tc.want {
 			t.Fatalf("page: %+v", page)
 		}
-		sorted, err := tc.reader.ListNodesSorted(ctx, 2, nil, nil, nil, nil, "", "", "", api.NodeSort{By: api.NodeSortName}, nil, 50, false)
+		sorted, err := tc.reader.ListNodesSorted(ctx, 2, nil, nil, nil, nil, nil, "", "", "", api.NodeSort{By: api.NodeSortName}, nil, 50, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,7 +125,7 @@ func TestLocalBordersPreserveReaderErrors(t *testing.T) {
 	if _, err := reader.GetNode(context.Background(), uuid.New()); !errors.Is(err, want) {
 		t.Fatal(err)
 	}
-	if _, err := reader.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 1, false); !errors.Is(err, want) {
+	if _, err := reader.ListNodes(context.Background(), 0, nil, nil, nil, nil, nil, "", "", "", 0, nil, 1, false); !errors.Is(err, want) {
 		t.Fatal(err)
 	}
 	base.err = nil
