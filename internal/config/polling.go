@@ -24,7 +24,7 @@ type PollingConfig struct {
 	ExcludedNodes    []string `yaml:"excluded_nodes"` // 64 hex each
 	Paused           bool     `yaml:"paused"`
 	Authority        string   `yaml:"authority"` // evidence (default) or approved
-	// RequestsPerUser is how many telemetry requests one user may hold; unset is 3, 0 turns requests off.
+	// RequestsPerUser is how many telemetry requests one user may hold; unset is 6, 0 turns requests off.
 	RequestsPerUser    *int   `yaml:"requests_per_user"`
 	OfflineDisableDays int    `yaml:"offline_disable_days"` // default 7
 	RequestObservers   string `yaml:"request_observers"`    // all (default) or approved
