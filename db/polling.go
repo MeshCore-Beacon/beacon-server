@@ -805,6 +805,65 @@ func (s *Store) GetNodePolling(ctx context.Context, nodeID uuid.UUID) (*api.Node
 	return out, nil
 }
 
+// GetNodePoller returns the node's own polling claim, live or expired, and the targets it names. Claim is nil when
+// the node has none. An unknown node returns pgx.ErrNoRows.
+func (s *Store) GetNodePoller(ctx context.Context, nodeID uuid.UUID) (*api.NodePoller, error) {
+	key, err := s.q.NodePublicKey(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	out := &api.NodePoller{Targets: []api.NodePollerTarget{}}
+	now := time.Now()
+	cl, err := s.q.NodePollerClaim(ctx, sqlc.NodePollerClaimParams{ObserverPublicKey: key, ReadingsAfter: ts(now.Add(-24 * time.Hour))})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.q.NodePollerTargets(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	slots := api.NodePollerSlots{Max: polling.MaxRequestSlots, Used: len(rows)}
+	for _, r := range rows {
+		t := api.NodePollerTarget{
+			PublicKey: hex.EncodeToString(r.TargetPublicKey), Requested: r.Requested, Role: "unassigned",
+			State: r.State, Misses: int(r.Misses), LastAttempt: epochMs(r.LastAttempt), LastOk: epochMs(r.LastOk),
+			ClaimedSnr: r.ClaimedSnr, EvidenceSnr: r.EvidenceSnr, EvidenceCount: int(r.EvidenceCount),
+			LatestReadingAt: epochMs(r.LatestReadingAt),
+		}
+		if r.NodeID.Valid {
+			id := uuid.UUID(r.NodeID.Bytes)
+			t.NodeID = &id
+		}
+		if r.Name != "" {
+			name := r.Name
+			t.Name = &name
+		}
+		if r.Rank != nil {
+			rank := int(*r.Rank)
+			t.Rank, t.Role = &rank, "standby"
+			if rank == 0 {
+				t.Role = "poller"
+			}
+		}
+		if r.Requested {
+			slots.Requested++
+		}
+		out.Targets = append(out.Targets, t)
+	}
+	slots.Own = slots.Used - slots.Requested
+	// A claim can name more targets than the limit; it then has no seat left whatever it says.
+	slots.Free = min(max(int(cl.RequestSlots), 0), max(slots.Max-slots.Used, 0))
+	out.Claim = &api.NodePollerClaim{
+		ReceivedAt: cl.ReceivedAt.Time.UnixMilli(), Live: cl.ReceivedAt.Time.After(now.Add(-polling.ClaimTTL)),
+		AcceptsRequests: cl.AcceptsRequests, Slots: slots,
+	}
+	out.Readings24h = int(cl.Readings)
+	return out, nil
+}
+
 // ListLatestNodeReadings returns each polled node's newest trusted battery and temperature since the given time.
 func (s *Store) ListLatestNodeReadings(ctx context.Context, iatas []string, since time.Time) ([]api.NodeLatestReading, error) {
 	rows, err := s.q.LatestNodeReadings(ctx, sqlc.LatestNodeReadingsParams{Since: ts(since), Iatas: iatas})

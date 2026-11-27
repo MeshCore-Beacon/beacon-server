@@ -5000,6 +5000,59 @@ const docTemplate = `{
                 }
             }
         },
+        "/nodes/{nodeId}/poller": {
+            "get": {
+                "description": "For a node that is an observer with a polling claim: its newest claim with slot usage, the readings it delivered in the last 24 hours, and one row per repeater the claim names, assigned ones first by rank. An expired claim is still returned with live false while it is stored. claim is null and targets is empty when the node has no claim or polling is off.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Nodes"
+                ],
+                "summary": "Get what a node polls",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Node UUID",
+                        "name": "nodeId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePoller"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "The read took too long: retry after Retry-After seconds",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/nodes/{nodeId}/polling": {
             "get": {
                 "description": "The observer assigned to poll the node (null when nobody is), its standbys in rank order, and the time of the newest trusted reading. polled is true when the node has any reading at all. Answers as for an unpolled node when polling is off.",
@@ -9293,6 +9346,123 @@ const docTemplate = `{
                         "type",
                         "neighbors"
                     ]
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodePoller": {
+            "type": "object",
+            "properties": {
+                "claim": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollerClaim"
+                },
+                "readings24h": {
+                    "description": "readings it delivered in the last 24 h",
+                    "type": "integer"
+                },
+                "targets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollerTarget"
+                    }
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollerClaim": {
+            "type": "object",
+            "properties": {
+                "acceptsRequests": {
+                    "type": "boolean"
+                },
+                "live": {
+                    "type": "boolean"
+                },
+                "receivedAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "slots": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollerSlots"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollerSlots": {
+            "type": "object",
+            "properties": {
+                "free": {
+                    "description": "seats it still offers to requests",
+                    "type": "integer"
+                },
+                "max": {
+                    "type": "integer"
+                },
+                "own": {
+                    "description": "targets the poller chose itself",
+                    "type": "integer"
+                },
+                "requested": {
+                    "description": "targets it polls for a request",
+                    "type": "integer"
+                },
+                "used": {
+                    "description": "targets the claim names",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollerTarget": {
+            "type": "object",
+            "properties": {
+                "claimedSnr": {
+                    "type": "number"
+                },
+                "evidenceCount": {
+                    "type": "integer"
+                },
+                "evidenceSnr": {
+                    "description": "as of the last election",
+                    "type": "number"
+                },
+                "lastAttempt": {
+                    "description": "epoch ms, null when never",
+                    "type": "integer"
+                },
+                "lastOk": {
+                    "description": "epoch ms, null when never",
+                    "type": "integer"
+                },
+                "latestReadingAt": {
+                    "description": "newest reading this poller delivered, epoch ms",
+                    "type": "integer"
+                },
+                "misses": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nodeId": {
+                    "description": "null when the target has no node row",
+                    "type": "string"
+                },
+                "publicKey": {
+                    "type": "string"
+                },
+                "rank": {
+                    "type": "integer"
+                },
+                "requested": {
+                    "type": "boolean"
+                },
+                "role": {
+                    "type": "string",
+                    "enum": [
+                        "poller",
+                        "standby",
+                        "unassigned"
+                    ]
+                },
+                "state": {
+                    "type": "string"
                 }
             }
         },

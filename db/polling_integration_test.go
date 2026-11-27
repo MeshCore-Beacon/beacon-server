@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sort"
 	"sync"
 	"testing"
@@ -1523,6 +1524,157 @@ func TestNodePollingPostgres(t *testing.T) {
 		t.Fatalf("bare node: %+v %v", got, err)
 	}
 	if _, err = s.GetNodePolling(ctx, uuid.New()); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("unknown node err = %v, want pgx.ErrNoRows", err)
+	}
+}
+
+func TestNodePollerPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	obs, other := pollKey(1), pollKey(2)
+	obsID, otherID := pollObserver(t, ctx, s, obs), pollObserver(t, ctx, s, other)
+	pollerNode, bare := uuid.New(), uuid.New()
+	nodes := map[uuid.UUID]struct {
+		key  []byte
+		name any
+	}{
+		pollerNode: {obs, "HOWL"}, bare: {pollKey(0x7F), "bare"},
+		uuid.New(): {pollKey(0xA), "Ridge"}, uuid.New(): {pollKey(0xB), "alpha"},
+		uuid.New(): {pollKey(0xC), "Zulu"}, uuid.New(): {pollKey(0xD), ""},
+	}
+	ids := map[string]uuid.UUID{}
+	for id, n := range nodes {
+		if _, err := pool.Exec(ctx, `INSERT INTO nodes (id, public_key, node_type, name) VALUES ($1, $2, 2, $3)`, id, n.key, n.name); err != nil {
+			t.Fatal(err)
+		}
+		ids[hex.EncodeToString(n.key)] = id
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := pool.Exec(ctx, `INSERT INTO polling_claims (observer_public_key, observer_id, origin, client, policy_version, accepts_requests, request_slots, claimed_at, received_at)
+		VALUES ($1, $2, 'o', 'fw', 'p', true, 7, $3, $3)`, obs, obsID, now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	attempt, ok := now.Add(-10*time.Minute), now.Add(-20*time.Minute)
+	// 0xE has no node row. 0xA is this observer's to poll, 0xB it stands by for, the rest are unassigned.
+	cand := func(target byte, requested bool, state string, misses int, snr *float32, lastAttempt, lastOK *time.Time) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO polling_candidates (observer_public_key, target_public_key, key_mode, claimed_snr, requested, state, misses, last_attempt, last_ok)
+			VALUES ($1, $2, 'own', $3, $4, $5, $6, $7, $8)`, obs, pollKey(target), snr, requested, state, misses, lastAttempt, lastOK); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snr := float32(9.5)
+	cand(0xA, false, "ok", 0, &snr, &attempt, &ok)
+	cand(0xB, true, "login_failed", 2, nil, &attempt, nil)
+	cand(0xC, false, "", 0, nil, nil, nil)
+	cand(0xD, true, "not_direct", 5, nil, nil, nil)
+	cand(0xE, false, "made_up", 1, nil, nil, nil)
+	assign := func(target byte, observer []byte, rank int, evidence *float32, n int) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO polling_assignments (target_public_key, observer_public_key, rank, evidence_snr, evidence_count, assigned_at)
+			VALUES ($1, $2, $3, $4, $5, $6)`, pollKey(target), observer, rank, evidence, n, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ev := float32(8.25)
+	assign(0xA, obs, 0, &ev, 14)
+	assign(0xB, other, 0, &ev, 30)
+	assign(0xB, obs, 1, nil, 0)
+	assign(0xC, other, 0, &ev, 9) // another observer's assignment gives this one no role
+	reading := func(target byte, observer []byte, observerID uuid.UUID, sampled, received time.Time, tag int, trusted bool) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO repeater_readings (target_public_key, observer_public_key, observer_id, sampled_at, received_at, method, tag, battery_mv, trusted)
+			VALUES ($1, $2, $3, $4, $5, 'status', $6, 4000, $7)`, pollKey(target), observer, observerID, sampled, received, tag, trusted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newestA := now.Add(-time.Hour)
+	reading(0xA, obs, obsID, now.Add(-3*time.Hour), now.Add(-3*time.Hour), 1, true)
+	reading(0xA, obs, obsID, newestA, newestA, 2, false) // newest, untrusted: still what this poller delivered
+	reading(0xA, other, otherID, now.Add(-time.Minute), now.Add(-time.Minute), 3, true)
+	reading(0xA, obs, obsID, now.Add(-30*time.Hour), now.Add(-30*time.Hour), 4, true) // outside the 24 h count
+	oldE := now.Add(-26 * time.Hour)
+	reading(0xE, obs, obsID, oldE, oldE, 5, false)
+
+	got, err := s.GetNodePoller(ctx, pollerNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := got.Claim
+	if c == nil || !c.Live || !c.AcceptsRequests || c.ReceivedAt != now.Add(-time.Minute).UnixMilli() {
+		t.Fatalf("claim = %+v", c)
+	}
+	// request_slots 7 is clamped to the 3 slots the 5 named targets leave.
+	if want := (api.NodePollerSlots{Max: 8, Used: 5, Own: 3, Requested: 2, Free: 3}); c.Slots != want {
+		t.Errorf("slots = %+v, want %+v", c.Slots, want)
+	}
+	if got.Readings24h != 2 {
+		t.Errorf("readings24h = %d, want 2", got.Readings24h)
+	}
+	type row struct {
+		key, name, role, state string
+		rank                   int
+	}
+	var rows []row
+	for _, x := range got.Targets {
+		r := row{key: x.PublicKey[:2], role: x.Role, state: x.State, rank: -1}
+		if x.Name != nil {
+			r.name = *x.Name
+		}
+		if x.Rank != nil {
+			r.rank = *x.Rank
+		}
+		rows = append(rows, r)
+	}
+	// Assigned by rank, then unassigned by name without regard to case, nameless last by key.
+	want := []row{{"0a", "Ridge", "poller", "ok", 0}, {"0b", "alpha", "standby", "login_failed", 1},
+		{"0c", "Zulu", "unassigned", "", -1}, {"0d", "", "unassigned", "not_direct", -1}, {"0e", "", "unassigned", "made_up", -1}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("targets = %+v\nwant %+v", rows, want)
+	}
+	a, b, d, e := got.Targets[0], got.Targets[1], got.Targets[3], got.Targets[4]
+	if a.NodeID == nil || *a.NodeID != ids[a.PublicKey] || a.PublicKey != hex.EncodeToString(pollKey(0xA)) || a.Requested || a.Misses != 0 ||
+		a.LastAttempt == nil || *a.LastAttempt != attempt.UnixMilli() || a.LastOk == nil || *a.LastOk != ok.UnixMilli() ||
+		a.ClaimedSnr == nil || *a.ClaimedSnr != 9.5 || a.EvidenceSnr == nil || *a.EvidenceSnr != 8.25 || a.EvidenceCount != 14 ||
+		a.LatestReadingAt == nil || *a.LatestReadingAt != newestA.UnixMilli() {
+		t.Errorf("poller row = %+v", a)
+	}
+	if !b.Requested || b.Misses != 2 || b.LastAttempt == nil || b.LastOk != nil || b.ClaimedSnr != nil || b.EvidenceSnr != nil ||
+		b.EvidenceCount != 0 || b.LatestReadingAt != nil {
+		t.Errorf("standby row = %+v", b)
+	}
+	if d.NodeID == nil || d.Name != nil || !d.Requested || d.Rank != nil {
+		t.Errorf("empty-name row = %+v", d)
+	}
+	if e.NodeID != nil || e.Name != nil || e.Rank != nil || e.EvidenceCount != 0 || e.LatestReadingAt == nil || *e.LatestReadingAt != oldE.UnixMilli() {
+		t.Errorf("row without a node = %+v", e)
+	}
+
+	// An expired claim is still returned, not live, with its targets. Free never goes below zero.
+	if _, err := pool.Exec(ctx, `UPDATE polling_claims SET received_at = $2, request_slots = -4, accepts_requests = false WHERE observer_public_key = $1`,
+		obs, now.Add(-polling.ClaimTTL-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.GetNodePoller(ctx, pollerNode)
+	if err != nil || got.Claim == nil || got.Claim.Live || got.Claim.AcceptsRequests || got.Claim.Slots.Free != 0 || got.Claim.Slots.Used != 5 || len(got.Targets) != 5 {
+		t.Errorf("stale claim: %+v %v", got, err)
+	}
+
+	// More targets than the limit leave no free slot.
+	for b := byte(0x20); b < 0x24; b++ {
+		cand(b, false, "ok", 0, nil, nil, nil)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE polling_claims SET request_slots = 2 WHERE observer_public_key = $1`, obs); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = s.GetNodePoller(ctx, pollerNode); err != nil || got.Claim.Slots != (api.NodePollerSlots{Max: 8, Used: 9, Own: 7, Requested: 2}) {
+		t.Errorf("over the limit: %+v %v", got.Claim, err)
+	}
+
+	got, err = s.GetNodePoller(ctx, bare)
+	if err != nil || got.Claim != nil || got.Readings24h != 0 || got.Targets == nil || len(got.Targets) != 0 {
+		t.Fatalf("node with no claim: %+v %v", got, err)
+	}
+	if _, err = s.GetNodePoller(ctx, uuid.New()); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("unknown node err = %v, want pgx.ErrNoRows", err)
 	}
 }

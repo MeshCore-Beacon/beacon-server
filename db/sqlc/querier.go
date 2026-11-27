@@ -700,6 +700,12 @@ type Querier interface {
 	NodeHasReadings(ctx context.Context, targetPublicKey []byte) (bool, error)
 	NodeIDsByKeys(ctx context.Context, dollar_1 [][]byte) ([]NodeIDsByKeysRow, error)
 	NodeLatestTrustedReadingAt(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error)
+	// The observer's stored claim, live or expired, with how many readings it delivered since readings_after.
+	NodePollerClaim(ctx context.Context, arg NodePollerClaimParams) (NodePollerClaimRow, error)
+	// The targets the observer's claim names, assigned ones first by rank. rank is NULL when the observer holds no
+	// assignment for the target. Evidence is the assignment's, frozen at the election. latest_reading_at is the newest
+	// reading this observer delivered for the target, trusted or not. name is '' when the target has no node row or name.
+	NodePollerTargets(ctx context.Context, observerPublicKey []byte) ([]NodePollerTargetsRow, error)
 	// Assigned observers of one target by rank. An assignment whose observer has no row is left out.
 	NodePollingAssignments(ctx context.Context, targetPublicKey []byte) ([]NodePollingAssignmentsRow, error)
 	NodePublicKey(ctx context.Context, id uuid.UUID) ([]byte, error)

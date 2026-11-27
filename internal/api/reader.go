@@ -109,6 +109,10 @@ type Reader interface {
 	// GetNodePolling returns who polls a node and its newest trusted reading. Returns pgx.ErrNoRows for an unknown node.
 	GetNodePolling(ctx context.Context, nodeID uuid.UUID) (*NodePolling, error)
 
+	// GetNodePoller returns the node's own polling claim and the targets it names. Claim is nil when it has none.
+	// Returns pgx.ErrNoRows for an unknown node.
+	GetNodePoller(ctx context.Context, nodeID uuid.UUID) (*NodePoller, error)
+
 	// GetObserverActivity returns bucketed heard-activity for an observer over the trailing window.
 	// interval >= 1h is served from the hourly rollup. Returns pgx.ErrNoRows for an unknown observer.
 	// Range and Interval on the result are left empty for the handler to fill.

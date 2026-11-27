@@ -289,6 +289,49 @@ type NodePolling struct {
 	Standbys        []NodePollingObserver `json:"standbys"`
 }
 
+// NodePollerSlots is how a poller's target slots are used. Max is the firmware limit.
+type NodePollerSlots struct {
+	Max       int `json:"max"`
+	Used      int `json:"used"`      // targets the claim names
+	Own       int `json:"own"`       // targets the poller chose itself
+	Requested int `json:"requested"` // targets it polls for a request
+	Free      int `json:"free"`      // seats it still offers to requests
+}
+
+// NodePollerClaim is the newest claim a poller sent. Live is false once it is older than the claim TTL.
+type NodePollerClaim struct {
+	ReceivedAt      int64           `json:"receivedAt"` // epoch ms
+	Live            bool            `json:"live"`
+	AcceptsRequests bool            `json:"acceptsRequests"`
+	Slots           NodePollerSlots `json:"slots"`
+}
+
+// NodePollerTarget is one repeater a poller's claim names. Role is poller (rank 0), standby (rank 1+) or
+// unassigned (rank null). State is the device's own word for the target, passed through as stored.
+type NodePollerTarget struct {
+	NodeID          *uuid.UUID `json:"nodeId"` // null when the target has no node row
+	PublicKey       string     `json:"publicKey"`
+	Name            *string    `json:"name"`
+	Requested       bool       `json:"requested"`
+	Role            string     `json:"role" enums:"poller,standby,unassigned"`
+	Rank            *int       `json:"rank"`
+	State           string     `json:"state"`
+	Misses          int        `json:"misses"`
+	LastAttempt     *int64     `json:"lastAttempt"` // epoch ms, null when never
+	LastOk          *int64     `json:"lastOk"`      // epoch ms, null when never
+	ClaimedSnr      *float32   `json:"claimedSnr"`
+	EvidenceSnr     *float32   `json:"evidenceSnr"` // as of the last election
+	EvidenceCount   int        `json:"evidenceCount"`
+	LatestReadingAt *int64     `json:"latestReadingAt"` // newest reading this poller delivered, epoch ms
+}
+
+// NodePoller is what a node polls as an observer. Claim is null when the node has no polling claim.
+type NodePoller struct {
+	Claim       *NodePollerClaim   `json:"claim"`
+	Readings24h int                `json:"readings24h"` // readings it delivered in the last 24 h
+	Targets     []NodePollerTarget `json:"targets"`
+}
+
 // NodeLatestReading is the newest trusted battery and temperature of one polled node. SampledAt is the later of
 // the two readings' times.
 type NodeLatestReading struct {

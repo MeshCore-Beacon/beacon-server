@@ -1032,6 +1032,106 @@ func (q *Queries) NodeLatestTrustedReadingAt(ctx context.Context, targetPublicKe
 	return sampled_at, err
 }
 
+const nodePollerClaim = `-- name: NodePollerClaim :one
+SELECT cl.received_at, cl.accepts_requests, cl.request_slots::int AS request_slots,
+       (SELECT count(*) FROM repeater_readings r
+        WHERE r.observer_public_key = cl.observer_public_key AND r.received_at > $1)::int AS readings
+FROM polling_claims cl
+WHERE cl.observer_public_key = $2
+`
+
+type NodePollerClaimParams struct {
+	ReadingsAfter     pgtype.Timestamptz `json:"readings_after"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+}
+
+type NodePollerClaimRow struct {
+	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
+	AcceptsRequests bool               `json:"accepts_requests"`
+	RequestSlots    int32              `json:"request_slots"`
+	Readings        int32              `json:"readings"`
+}
+
+// The observer's stored claim, live or expired, with how many readings it delivered since readings_after.
+func (q *Queries) NodePollerClaim(ctx context.Context, arg NodePollerClaimParams) (NodePollerClaimRow, error) {
+	row := q.db.QueryRow(ctx, nodePollerClaim, arg.ReadingsAfter, arg.ObserverPublicKey)
+	var i NodePollerClaimRow
+	err := row.Scan(
+		&i.ReceivedAt,
+		&i.AcceptsRequests,
+		&i.RequestSlots,
+		&i.Readings,
+	)
+	return i, err
+}
+
+const nodePollerTargets = `-- name: NodePollerTargets :many
+SELECT c.target_public_key, c.requested, c.state, c.misses::int AS misses, c.last_attempt, c.last_ok, c.claimed_snr,
+       a.rank, a.evidence_snr, COALESCE(a.evidence_count, 0)::int AS evidence_count,
+       n.id AS node_id, COALESCE(n.name, '')::text AS name,
+       (SELECT r.sampled_at FROM repeater_readings r
+        WHERE r.target_public_key = c.target_public_key AND r.observer_public_key = c.observer_public_key
+        ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_reading_at
+FROM polling_candidates c
+LEFT JOIN polling_assignments a ON a.target_public_key = c.target_public_key AND a.observer_public_key = c.observer_public_key
+LEFT JOIN nodes n ON n.public_key = c.target_public_key
+WHERE c.observer_public_key = $1
+ORDER BY a.rank NULLS LAST, lower(NULLIF(n.name, '')) NULLS LAST, c.target_public_key
+`
+
+type NodePollerTargetsRow struct {
+	TargetPublicKey []byte             `json:"target_public_key"`
+	Requested       bool               `json:"requested"`
+	State           string             `json:"state"`
+	Misses          int32              `json:"misses"`
+	LastAttempt     pgtype.Timestamptz `json:"last_attempt"`
+	LastOk          pgtype.Timestamptz `json:"last_ok"`
+	ClaimedSnr      *float32           `json:"claimed_snr"`
+	Rank            *int16             `json:"rank"`
+	EvidenceSnr     *float32           `json:"evidence_snr"`
+	EvidenceCount   int32              `json:"evidence_count"`
+	NodeID          pgtype.UUID        `json:"node_id"`
+	Name            string             `json:"name"`
+	LatestReadingAt pgtype.Timestamptz `json:"latest_reading_at"`
+}
+
+// The targets the observer's claim names, assigned ones first by rank. rank is NULL when the observer holds no
+// assignment for the target. Evidence is the assignment's, frozen at the election. latest_reading_at is the newest
+// reading this observer delivered for the target, trusted or not. name is ” when the target has no node row or name.
+func (q *Queries) NodePollerTargets(ctx context.Context, observerPublicKey []byte) ([]NodePollerTargetsRow, error) {
+	rows, err := q.db.Query(ctx, nodePollerTargets, observerPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NodePollerTargetsRow{}
+	for rows.Next() {
+		var i NodePollerTargetsRow
+		if err := rows.Scan(
+			&i.TargetPublicKey,
+			&i.Requested,
+			&i.State,
+			&i.Misses,
+			&i.LastAttempt,
+			&i.LastOk,
+			&i.ClaimedSnr,
+			&i.Rank,
+			&i.EvidenceSnr,
+			&i.EvidenceCount,
+			&i.NodeID,
+			&i.Name,
+			&i.LatestReadingAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const nodePollingAssignments = `-- name: NodePollingAssignments :many
 SELECT o.id AS observer_id, a.rank::int AS rank,
        COALESCE(NULLIF(o.display_name, ''), left(encode(o.public_key, 'hex'), 8))::text AS name

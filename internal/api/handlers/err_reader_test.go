@@ -91,6 +91,10 @@ func (e errReader) GetNodePolling(ctx context.Context, nodeID uuid.UUID) (v *api
 	return v, e.err
 }
 
+func (e errReader) GetNodePoller(ctx context.Context, nodeID uuid.UUID) (v *api.NodePoller, err error) {
+	return v, e.err
+}
+
 func (e errReader) GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration, until time.Time) (v *api.ObserverActivity, err error) {
 	return v, e.err
 }

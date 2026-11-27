@@ -167,6 +167,10 @@ func (s *stubReader) GetNodePolling(_ context.Context, _ uuid.UUID) (*api.NodePo
 	return nil, nil
 }
 
+func (s *stubReader) GetNodePoller(_ context.Context, _ uuid.UUID) (*api.NodePoller, error) {
+	return nil, nil
+}
+
 func (s *stubReader) GetObserverTelemetry(_ context.Context, _ uuid.UUID, _, _ time.Time, _ int64) (*api.ObserverTelemetry, error) {
 	return nil, nil
 }
