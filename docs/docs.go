@@ -5644,7 +5644,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Bucketing interval: 1h (default), 6h, or 24h",
+                        "description": "1h (default) returns the stored snapshots as they are: one per telemetry.resolution window (15 minutes by default) plus a row at the moment of each reboot, so points are not evenly spaced. 6h and 24h return buckets of that size",
                         "name": "interval",
                         "in": "query"
                     }
@@ -9396,7 +9396,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "free": {
-                    "description": "seats it still offers to requests",
+                    "description": "seats a request can still take: 0 unless the claim is live and accepts requests, less those handed out but not yet claimed",
                     "type": "integer"
                 },
                 "max": {

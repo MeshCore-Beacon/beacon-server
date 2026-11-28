@@ -295,7 +295,7 @@ type NodePollerSlots struct {
 	Used      int `json:"used"`      // targets the claim names
 	Own       int `json:"own"`       // targets the poller chose itself
 	Requested int `json:"requested"` // targets it polls for a request
-	Free      int `json:"free"`      // seats it still offers to requests
+	Free      int `json:"free"`      // seats a request can still take: 0 unless the claim is live and accepts requests, less those handed out but not yet claimed
 }
 
 // NodePollerClaim is the newest claim a poller sent. Live is false once it is older than the claim TTL.
