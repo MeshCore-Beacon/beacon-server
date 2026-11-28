@@ -1,13 +1,15 @@
 -- name: UpsertPollingClaim :execrows
 -- Applies only a claim newer than the stored one and received at least the claim interval after it, checked in
 -- this statement so concurrent claims cannot both pass. Zero rows means it was ignored.
-INSERT INTO polling_claims (observer_public_key, observer_id, origin, client, policy_version, community, accepts_requests, request_slots, claimed_at, received_at)
+INSERT INTO polling_claims (observer_public_key, observer_id, origin, client, policy_version, community, accepts_requests, request_slots, max_slots, poll_interval, claimed_at, received_at)
 VALUES (sqlc.arg(observer_public_key), sqlc.arg(observer_id), sqlc.arg(origin), sqlc.arg(client), sqlc.arg(policy_version),
-        sqlc.arg(community), sqlc.arg(accepts_requests), sqlc.arg(request_slots), sqlc.arg(claimed_at), sqlc.arg(received_at))
+        sqlc.arg(community), sqlc.arg(accepts_requests), sqlc.arg(request_slots), sqlc.narg(max_slots), sqlc.narg(poll_interval),
+        sqlc.arg(claimed_at), sqlc.arg(received_at))
 ON CONFLICT (observer_public_key) DO UPDATE SET
     observer_id = EXCLUDED.observer_id, origin = EXCLUDED.origin, client = EXCLUDED.client,
     policy_version = EXCLUDED.policy_version, community = EXCLUDED.community,
     accepts_requests = EXCLUDED.accepts_requests, request_slots = EXCLUDED.request_slots,
+    max_slots = EXCLUDED.max_slots, poll_interval = EXCLUDED.poll_interval,
     claimed_at = EXCLUDED.claimed_at, received_at = EXCLUDED.received_at
 WHERE EXCLUDED.claimed_at > polling_claims.claimed_at AND polling_claims.received_at <= sqlc.arg(previous_received_by);
 
@@ -189,7 +191,7 @@ WITH me AS (
 SELECT cl.observer_public_key, c.claimed_snr, COALESCE(c.state, '')::text AS state, COALESCE(c.misses, 0)::smallint AS misses,
        COALESCE(c.requested, false)::boolean AS requested,
        COALESCE(po.blocked, false) AS blocked, COALESCE(po.approved, false) AS approved,
-       cl.request_slots::int AS request_slots,
+       cl.request_slots::int AS request_slots, COALESCE(cl.max_slots, 0)::int AS max_slots,
        (SELECT count(*) FROM polling_candidates h WHERE h.observer_public_key = cl.observer_public_key AND h.requested)::int AS held,
        EXISTS (SELECT 1 FROM polling_admin_stops s
                WHERE s.target_public_key = sqlc.arg(target_public_key) AND s.observer_public_key = cl.observer_public_key) AS admin_stopped,
@@ -213,7 +215,7 @@ ORDER BY cl.observer_public_key;
 -- advert evidence (the newest per assignee, then the newest of those), so an observer Beacon has never heard the repeater through cannot stand others down. A target the
 -- observer was handed as a requested one is listed even before its claim names it (that is how it learns of it);
 -- claimed_requested is true when the claim names it as requested; target_requested when a request is in use for it.
--- accepts_requests and request_slots are the claim's, for polling.OfferSeats. The observer's flags and the password
+-- accepts_requests, request_slots and max_slots (0 when the claim gave none) are the claim's, for polling.OfferSeats. The observer's flags and the password
 -- in use come from the same statement, so an answer never pairs a password with an approval it did not exist under.
 -- The password is only read for a requested assignment of an unblocked observer whose claim accepts requests.
 WITH mine AS (
@@ -234,7 +236,7 @@ SELECT m.target_public_key::bytea AS target_public_key, COALESCE(a.rank, -1)::in
        COALESCE(pc.requested, false)::boolean AS claimed_requested,
        EXISTS (SELECT 1 FROM polling_targets pt
                WHERE pt.target_public_key = m.target_public_key AND pt.active_request_id IS NOT NULL) AS target_requested,
-       cl.accepts_requests, cl.request_slots::int AS request_slots,
+       cl.accepts_requests, cl.request_slots::int AS request_slots, COALESCE(cl.max_slots, 0)::int AS max_slots,
        COALESCE(po.approved, false)::boolean AS observer_approved, COALESCE(po.blocked, false)::boolean AS observer_blocked,
        pr.id AS request_id, pt.ver AS password_ver, pr.password_ct, pr.password_nonce,
        EXISTS (SELECT 1 FROM observers o
@@ -430,6 +432,7 @@ ORDER BY a.rank, o.id;
 -- delivered for the target, trusted or not. name is '' when the target has no node row or name.
 WITH cl AS MATERIALIZED (
     SELECT p.observer_public_key, p.received_at, p.accepts_requests, p.request_slots::int AS request_slots,
+           p.max_slots, p.poll_interval,
            (SELECT count(*) FROM repeater_readings r
             WHERE r.observer_public_key = p.observer_public_key AND r.received_at > sqlc.arg(readings_after))::int AS readings,
            (SELECT count(*) FROM polling_assignments x
@@ -440,7 +443,7 @@ WITH cl AS MATERIALIZED (
     FROM polling_claims p
     WHERE p.observer_public_key = sqlc.arg(observer_public_key)
 )
-SELECT cl.received_at, cl.accepts_requests, cl.request_slots, cl.readings, cl.pending_seats,
+SELECT cl.received_at, cl.accepts_requests, cl.request_slots, cl.max_slots, cl.poll_interval, cl.readings, cl.pending_seats,
        c.target_public_key, c.requested, c.state, c.misses, c.last_attempt, c.last_ok, c.claimed_snr,
        a.rank, a.evidence_snr, COALESCE(a.evidence_count, 0)::int AS evidence_count,
        n.id AS node_id, COALESCE(n.name, '')::text AS name,

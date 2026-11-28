@@ -289,7 +289,7 @@ type NodePolling struct {
 	Standbys        []NodePollingObserver `json:"standbys"`
 }
 
-// NodePollerSlots is how a poller's target slots are used. Max is the firmware limit.
+// NodePollerSlots is how a poller's target slots are used. Max is the limit the poller reports, 8 when it reports none.
 type NodePollerSlots struct {
 	Max       int `json:"max"`
 	Used      int `json:"used"`      // targets the claim names
@@ -300,10 +300,12 @@ type NodePollerSlots struct {
 
 // NodePollerClaim is the newest claim a poller sent. Live is false once it is older than the claim TTL.
 type NodePollerClaim struct {
-	ReceivedAt      int64           `json:"receivedAt"` // epoch ms
-	Live            bool            `json:"live"`
-	AcceptsRequests bool            `json:"acceptsRequests"`
-	Slots           NodePollerSlots `json:"slots"`
+	ReceivedAt      int64 `json:"receivedAt"` // epoch ms
+	Live            bool  `json:"live"`
+	AcceptsRequests bool  `json:"acceptsRequests"`
+	// PollIntervalMinutes is how often the poller polls each target, null when its firmware does not report it.
+	PollIntervalMinutes *int            `json:"pollIntervalMinutes"`
+	Slots               NodePollerSlots `json:"slots"`
 }
 
 // NodePollerTarget is one repeater a poller's claim names. Role is poller (rank 0), standby (rank 1+) or

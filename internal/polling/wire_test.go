@@ -6,8 +6,10 @@ package polling
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -392,6 +394,41 @@ func TestParseClaimClampsSlots(t *testing.T) {
 			t.Fatal(err)
 		}
 		eq(t, "RequestSlots for "+in, c.RequestSlots, want)
+	}
+}
+
+func TestParseClaimLimits(t *testing.T) {
+	base := string(readFile(t, "claim_extended.json"))
+	c, err := ParseClaim([]byte(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MaxSlots != nil || c.PollInterval != nil {
+		t.Fatalf("absent fields: %v %v", c.MaxSlots, c.PollInterval)
+	}
+	for _, tc := range []struct {
+		fields            string
+		slots             int
+		wantMax, wantPoll *int
+		wantSlots         int
+	}{
+		{`"max_slots": 8, "poll_interval": 60`, 3, new(8), new(60), 3},
+		{`"max_slots": 12`, 11, new(12), nil, 11},  // request_slots follows a larger limit
+		{`"max_slots": 4`, 7, new(4), nil, 4},      // and a smaller one
+		{`"max_slots": 500`, 40, new(32), nil, 32}, // held to the ceiling
+		{`"max_slots": 0`, 3, new(0), nil, 0},      // holds nothing
+		{`"max_slots": -3, "poll_interval": 0`, 3, new(0), nil, 0},
+		{`"max_slots": null, "poll_interval": -5`, 9, nil, nil, 8},
+		{`"poll_interval": 99999999999`, 3, nil, nil, 3}, // past an integer column
+	} {
+		doc := strings.Replace(base, `"request_slots": 3`, fmt.Sprintf(`"request_slots": %d, %s`, tc.slots, tc.fields), 1)
+		c, err := ParseClaim([]byte(doc))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.fields, err)
+		}
+		if !reflect.DeepEqual(c.MaxSlots, tc.wantMax) || !reflect.DeepEqual(c.PollInterval, tc.wantPoll) || c.RequestSlots != tc.wantSlots {
+			t.Errorf("%s: max %v poll %v slots %d", tc.fields, c.MaxSlots, c.PollInterval, c.RequestSlots)
+		}
 	}
 }
 

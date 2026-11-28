@@ -36,7 +36,7 @@ func TestGetNodePoller_Shape(t *testing.T) {
 	keyA, keyB := strings.Repeat("0a", 32), strings.Repeat("0b", 32)
 	sr := stubReader{getNodePoller: func(context.Context, uuid.UUID) (*api.NodePoller, error) {
 		return &api.NodePoller{
-			Claim: &api.NodePollerClaim{ReceivedAt: 1795800000000, Live: true, AcceptsRequests: true,
+			Claim: &api.NodePollerClaim{ReceivedAt: 1795800000000, Live: true, AcceptsRequests: true, PollIntervalMinutes: new(60),
 				Slots: api.NodePollerSlots{Max: 8, Used: 2, Own: 1, Requested: 1, Free: 3}},
 			Readings24h: 212,
 			Targets: []api.NodePollerTarget{
@@ -47,7 +47,7 @@ func TestGetNodePoller_Shape(t *testing.T) {
 		}, nil
 	}}
 	w := nodePollerGet(t, sr, uuid.NewString())
-	want := `{"claim":{"receivedAt":1795800000000,"live":true,"acceptsRequests":true,` +
+	want := `{"claim":{"receivedAt":1795800000000,"live":true,"acceptsRequests":true,"pollIntervalMinutes":60,` +
 		`"slots":{"max":8,"used":2,"own":1,"requested":1,"free":3}},"readings24h":212,"targets":[` +
 		`{"nodeId":"` + node.String() + `","publicKey":"` + keyA + `","name":"Ridge","requested":false,"role":"poller","rank":0,` +
 		`"state":"ok","misses":0,"lastAttempt":1795799000000,"lastOk":1795799000000,"claimedSnr":9.5,"evidenceSnr":8.1,` +

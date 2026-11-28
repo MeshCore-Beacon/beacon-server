@@ -136,22 +136,51 @@ func TestDecideRequestsNeedApprovalUnlessResolvedToAll(t *testing.T) {
 
 func TestFreeRequestSeats(t *testing.T) {
 	cases := []struct {
-		name                         string
-		open                         bool
-		slots, named, pending, wants int
+		name                              string
+		open                              bool
+		slots, max, named, pending, wants int
 	}{
-		{"claim's own number", true, 3, 2, 0, 3},
-		{"held to what the limit leaves", true, 7, 5, 0, 3},
-		{"more targets than the limit", true, 2, 9, 0, 0},
-		{"negative slots", true, -4, 0, 0, 0},
-		{"a seat handed out, not yet claimed", true, 3, 2, 1, 2},
-		{"every seat handed out", true, 3, 2, 3, 0},
-		{"more handed out than offered", true, 1, 2, 4, 0},
-		{"expired or not taking requests", false, 5, 1, 0, 0},
+		{"claim's own number", true, 3, 0, 2, 0, 3},
+		{"held to what the limit leaves", true, 7, 0, 5, 0, 3},
+		{"more targets than the limit", true, 2, 0, 9, 0, 0},
+		{"negative slots", true, -4, 0, 0, 0, 0},
+		{"a seat handed out, not yet claimed", true, 3, 0, 2, 1, 2},
+		{"every seat handed out", true, 3, 0, 2, 3, 0},
+		{"more handed out than offered", true, 1, 0, 2, 4, 0},
+		{"expired or not taking requests", false, 5, 0, 1, 0, 0},
+		{"a larger limit of its own", true, 4, 12, 8, 0, 4},
+		{"a smaller limit of its own", true, 4, 4, 3, 0, 1},
+		{"a limit past the ceiling", true, 40, 100, 0, 0, SlotCeiling},
 	}
 	for _, c := range cases {
-		if got := FreeRequestSeats(c.open, c.slots, c.named, c.pending); got != c.wants {
+		if got := FreeRequestSeats(c.open, c.slots, c.max, c.named, c.pending); got != c.wants {
 			t.Errorf("%s: got %d, want %d", c.name, got, c.wants)
+		}
+	}
+}
+
+func TestRequestCapacityFollowsClaimLimit(t *testing.T) {
+	for _, c := range []struct{ slots, held, max, want int }{
+		{6, 6, 0, 8},    // no limit reported: the default
+		{6, 6, 12, 12},  // a larger limit
+		{6, 2, 4, 4},    // a smaller one
+		{50, 0, 99, 32}, // never past the ceiling
+	} {
+		if got := RequestCapacity(Candidate{RequestSlots: c.slots, Held: c.held, MaxSlots: c.max}); got != c.want {
+			t.Errorf("%+v: got %d", c, got)
+		}
+	}
+}
+
+func TestOfferSeatsFollowsClaimLimit(t *testing.T) {
+	rows := make([]OwnerRow, 10)
+	for i := range rows {
+		rows[i] = OwnerRow{Rank: 0, Requested: true, TargetRequested: true, AcceptsRequests: true, RequestSlots: 10, MaxSlots: 12}
+	}
+	OfferSeats(rows)
+	for i, r := range rows {
+		if !r.PWOK {
+			t.Fatalf("row %d not offered under a limit of 12", i)
 		}
 	}
 }

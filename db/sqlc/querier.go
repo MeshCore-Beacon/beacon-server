@@ -746,7 +746,7 @@ type Querier interface {
 	// advert evidence (the newest per assignee, then the newest of those), so an observer Beacon has never heard the repeater through cannot stand others down. A target the
 	// observer was handed as a requested one is listed even before its claim names it (that is how it learns of it);
 	// claimed_requested is true when the claim names it as requested; target_requested when a request is in use for it.
-	// accepts_requests and request_slots are the claim's, for polling.OfferSeats. The observer's flags and the password
+	// accepts_requests, request_slots and max_slots (0 when the claim gave none) are the claim's, for polling.OfferSeats. The observer's flags and the password
 	// in use come from the same statement, so an answer never pairs a password with an approval it did not exist under.
 	// The password is only read for a requested assignment of an unblocked observer whose claim accepts requests.
 	PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsParams) ([]PollingOwnerRowsRow, error)

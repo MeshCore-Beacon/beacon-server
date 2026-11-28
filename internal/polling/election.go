@@ -29,6 +29,7 @@ type Candidate struct {
 	Requested bool
 	// The rest is only read for a requested target (see ElectRequested).
 	RequestSlots   int  // free seats the claim announced
+	MaxSlots       int  // the claim's target limit, 0 when it gave none
 	Held           int  // requested targets the claim names
 	AdminStopped   bool // the operator has not cleared this observer's admin stop for the target
 	SeatsElsewhere int  // requested assignments to older requested targets

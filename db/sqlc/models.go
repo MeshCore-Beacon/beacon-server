@@ -571,6 +571,8 @@ type PollingClaim struct {
 	RequestSlots      int16              `json:"request_slots"`
 	ClaimedAt         pgtype.Timestamptz `json:"claimed_at"`
 	ReceivedAt        pgtype.Timestamptz `json:"received_at"`
+	MaxSlots          *int16             `json:"max_slots"`
+	PollInterval      *int32             `json:"poll_interval"`
 }
 
 type PollingObserver struct {

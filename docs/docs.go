@@ -9383,6 +9383,10 @@ const docTemplate = `{
                 "live": {
                     "type": "boolean"
                 },
+                "pollIntervalMinutes": {
+                    "description": "PollIntervalMinutes is how often the poller polls each target, null when its firmware does not report it.",
+                    "type": "integer"
+                },
                 "receivedAt": {
                     "description": "epoch ms",
                     "type": "integer"

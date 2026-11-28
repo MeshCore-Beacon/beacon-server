@@ -8,8 +8,19 @@ import "github.com/MeshCore-Beacon/beacon-server/internal/config"
 // MaxRequestedPollers is the poller and its standbys for a requested target.
 const MaxRequestedPollers = 3
 
-// MaxRequestSlots is the firmware's target limit, the most seats the server believes a claim has.
+// MaxRequestSlots is the target limit of a device whose claim does not report max_slots.
 const MaxRequestSlots = 8
+
+// SlotCeiling is the most targets the server believes any claim's max_slots.
+const SlotCeiling = 32
+
+// SlotLimit is the target limit the server holds a claim to: its max_slots, or MaxRequestSlots when it has none.
+func SlotLimit(maxSlots int) int {
+	if maxSlots <= 0 {
+		return MaxRequestSlots
+	}
+	return min(maxSlots, SlotCeiling)
+}
 
 // ElectionInput is what one target's election works from.
 type ElectionInput struct {
@@ -30,25 +41,26 @@ type Election struct {
 
 // requestSeat reports whether the observer has a seat for the target: its claim's free seats plus those it already
 // holds, less the older requested targets it is assigned.
-// A claim is the observer's own word, so its numbers are held to the firmware's limit of 8 targets.
+// A claim is the observer's own word, so its numbers are held to its target limit.
 func requestSeat(c Candidate) bool {
 	return RequestCapacity(c)-c.SeatsElsewhere > 0
 }
 
 // RequestCapacity is how many requested targets the observer can hold: its free seats plus those it holds already.
 func RequestCapacity(c Candidate) int {
-	capacity := min(max(c.RequestSlots, 0), MaxRequestSlots) + min(max(c.Held, 0), MaxRequestSlots)
-	return min(capacity, MaxRequestSlots)
+	limit := SlotLimit(c.MaxSlots)
+	capacity := min(max(c.RequestSlots, 0), limit) + min(max(c.Held, 0), limit)
+	return min(capacity, limit)
 }
 
 // FreeRequestSeats is how many more requested targets an observer can be handed. open is false when its claim is not
-// live or takes no requests: it then has none. Otherwise it is the claim's free seats, held to what the firmware's
+// live or takes no requests: it then has none. Otherwise it is the claim's free seats, held to what its target
 // limit leaves beside the targets it names, less the seats already handed to it that its claim does not name yet.
-func FreeRequestSeats(open bool, requestSlots, named, pending int) int {
+func FreeRequestSeats(open bool, requestSlots, maxSlots, named, pending int) int {
 	if !open {
 		return 0
 	}
-	free := min(max(requestSlots, 0), max(MaxRequestSlots-named, 0))
+	free := min(max(requestSlots, 0), max(SlotLimit(maxSlots)-named, 0))
 	return max(free-max(pending, 0), 0)
 }
 

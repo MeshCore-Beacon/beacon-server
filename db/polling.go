@@ -133,6 +133,7 @@ func (s *Store) ReplacePollingClaimReporting(ctx context.Context, c polling.Clai
 			ObserverPublicKey: c.Observer, ObserverID: observerID,
 			Origin: clipText(c.Origin, 128), Client: clipText(c.Client, 128), PolicyVersion: clipText(c.PolicyVersion, 32),
 			Community: c.Community, AcceptsRequests: c.AcceptsRequests, RequestSlots: int16(c.RequestSlots),
+			MaxSlots: claimMaxSlots(c), PollInterval: claimPollInterval(c),
 			ClaimedAt: ts(c.Timestamp), ReceivedAt: ts(receivedAt),
 			PreviousReceivedBy: ts(receivedAt.Add(-polling.ClaimMinInterval)),
 		})
@@ -503,7 +504,7 @@ func listRequestCandidates(ctx context.Context, q sqlc.Querier, target []byte, r
 		out = append(out, polling.Candidate{
 			Observer: r.ObserverPublicKey, EvidenceSNR: &ev, EvidenceCount: int(r.EvidenceCount),
 			ClaimedSNR: r.ClaimedSnr, State: r.State, Misses: int(r.Misses), Blocked: r.Blocked, Approved: r.Approved,
-			Requested: r.Requested, RequestSlots: int(r.RequestSlots), Held: int(r.Held),
+			Requested: r.Requested, RequestSlots: int(r.RequestSlots), MaxSlots: int(r.MaxSlots), Held: int(r.Held),
 			AdminStopped: r.AdminStopped, SeatsElsewhere: int(r.SeatsElsewhere),
 		})
 	}
@@ -520,7 +521,7 @@ func (s *Store) PollingOwnerRows(ctx context.Context, observer []byte, receivedA
 	for _, r := range rows {
 		row := polling.OwnerRow{Target: r.TargetPublicKey, Rank: int(r.Rank), Assigned: int(r.Assigned),
 			Requested: r.Requested, ClaimedRequested: r.ClaimedRequested,
-			TargetRequested: r.TargetRequested, AcceptsRequests: r.AcceptsRequests, RequestSlots: int(r.RequestSlots),
+			TargetRequested: r.TargetRequested, AcceptsRequests: r.AcceptsRequests, RequestSlots: int(r.RequestSlots), MaxSlots: int(r.MaxSlots),
 			ObserverApproved: r.ObserverApproved, ObserverBlocked: r.ObserverBlocked, TargetIsObserver: r.TargetIsObserver}
 		if r.RequestID.Valid && r.PasswordVer != nil {
 			row.Password = &polling.RequestedPassword{RequestID: r.RequestID.Bytes, Ver: *r.PasswordVer, CT: r.PasswordCt, Nonce: r.PasswordNonce}
@@ -821,7 +822,7 @@ func (s *Store) GetNodePoller(ctx context.Context, nodeID uuid.UUID) (*api.NodeP
 	if len(rows) == 0 {
 		return out, nil
 	}
-	slots := api.NodePollerSlots{Max: polling.MaxRequestSlots}
+	var slots api.NodePollerSlots
 	for _, r := range rows {
 		if r.TargetPublicKey == nil { // the claim names nothing
 			continue
@@ -862,9 +863,20 @@ func (s *Store) GetNodePoller(ctx context.Context, nodeID uuid.UUID) (*api.NodeP
 	cl := rows[0]
 	live := cl.ReceivedAt.Time.After(now.Add(-polling.ClaimTTL))
 	slots.Own = slots.Used - slots.Requested
-	slots.Free = polling.FreeRequestSeats(live && cl.AcceptsRequests, int(cl.RequestSlots), slots.Used, int(cl.PendingSeats))
+	// A device that reports a limit of 0 holds nothing; one that reports none has the firmware default.
+	slots.Max = polling.MaxRequestSlots
+	if cl.MaxSlots != nil {
+		slots.Max = int(*cl.MaxSlots)
+	}
+	if slots.Max > 0 {
+		slots.Free = polling.FreeRequestSeats(live && cl.AcceptsRequests, int(cl.RequestSlots), slots.Max, slots.Used, int(cl.PendingSeats))
+	}
 	out.Claim = &api.NodePollerClaim{
 		ReceivedAt: cl.ReceivedAt.Time.UnixMilli(), Live: live, AcceptsRequests: cl.AcceptsRequests, Slots: slots,
+	}
+	if cl.PollInterval != nil {
+		n := int(*cl.PollInterval)
+		out.Claim.PollIntervalMinutes = &n
 	}
 	out.Readings24h = int(cl.Readings)
 	return out, nil
@@ -881,4 +893,20 @@ func (s *Store) ListLatestNodeReadings(ctx context.Context, iatas []string, sinc
 		out = append(out, api.NodeLatestReading{NodeID: r.NodeID, SampledAt: r.SampledAt.Time.UnixMilli(), BatteryMV: r.BatteryMv, TemperatureC: r.TemperatureC})
 	}
 	return out, nil
+}
+
+func claimMaxSlots(c polling.Claim) *int16 {
+	if c.MaxSlots == nil {
+		return nil
+	}
+	n := int16(*c.MaxSlots)
+	return &n
+}
+
+func claimPollInterval(c polling.Claim) *int32 {
+	if c.PollInterval == nil {
+		return nil
+	}
+	n := int32(*c.PollInterval)
+	return &n
 }

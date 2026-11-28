@@ -126,6 +126,47 @@ func TestPollingClaimOlderIsIgnoredPostgres(t *testing.T) {
 	}
 }
 
+// A claim's own limits are stored, drive the poller view, and clear again when a later claim leaves them out.
+func TestPollingClaimLimitsPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	o := pollKey(1)
+	id := pollObserver(t, ctx, s, o)
+	node := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO nodes (id, public_key, node_type, name) VALUES ($1, $2, 2, 'p')`, node, o); err != nil {
+		t.Fatal(err)
+	}
+	T := time.Now().Add(-3 * polling.ClaimMinInterval).UTC().Truncate(time.Second)
+	targets := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	c := pollClaim(o, T, targets...)
+	c.AcceptsRequests, c.RequestSlots, c.MaxSlots, c.PollInterval = true, 2, new(12), new(60)
+	if ok, err := s.ReplacePollingClaim(ctx, c, id, T); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	got, err := s.GetNodePoller(ctx, node)
+	if err != nil || got.Claim == nil {
+		t.Fatal(got, err)
+	}
+	if want := (api.NodePollerSlots{Max: 12, Used: 10, Own: 10, Free: 2}); got.Claim.Slots != want {
+		t.Errorf("slots = %+v, want %+v", got.Claim.Slots, want)
+	}
+	if got.Claim.PollIntervalMinutes == nil || *got.Claim.PollIntervalMinutes != 60 {
+		t.Errorf("poll interval = %v", got.Claim.PollIntervalMinutes)
+	}
+	// Firmware that reports neither: the default limit, which the ten named targets already pass.
+	later := T.Add(2 * polling.ClaimMinInterval)
+	c = pollClaim(o, later, targets...)
+	c.AcceptsRequests, c.RequestSlots = true, 2
+	if ok, err := s.ReplacePollingClaim(ctx, c, id, later); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if got, err = s.GetNodePoller(ctx, node); err != nil || got.Claim == nil {
+		t.Fatal(got, err)
+	}
+	if want := (api.NodePollerSlots{Max: 8, Used: 10, Own: 10}); got.Claim.Slots != want || got.Claim.PollIntervalMinutes != nil {
+		t.Errorf("without limits: %+v", got.Claim)
+	}
+}
+
 func TestPollingClaimTruncatesTextPostgres(t *testing.T) {
 	ctx, pool, s := pollStore(t)
 	o := pollKey(1)

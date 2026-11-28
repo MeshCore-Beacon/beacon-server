@@ -22,7 +22,6 @@ const (
 	maxClaimNodes  = 32 // firmware sends at most 8; the reference plugin can send more
 	maxReadings    = 8  // firmware sends exactly 1
 	maxLPPBytes    = 160
-	maxSlots       = 8
 	packetHashSize = 8 // the firmware's reply packet hash
 )
 
@@ -35,6 +34,8 @@ type Claim struct {
 	Community       bool
 	AcceptsRequests bool
 	RequestSlots    int
+	MaxSlots        *int // the device's target limit, nil when it does not say
+	PollInterval    *int // minutes between polls of a target, nil when it does not say
 	Nodes           []ClaimNode
 }
 
@@ -83,6 +84,8 @@ type claimWire struct {
 	Community       bool            `json:"community"`
 	AcceptsRequests bool            `json:"accepts_requests"`
 	RequestSlots    wireInt         `json:"request_slots"`
+	MaxSlots        wireInt         `json:"max_slots"`
+	PollInterval    wireInt         `json:"poll_interval"`
 	Nodes           []claimNodeWire `json:"nodes"`
 }
 
@@ -256,7 +259,14 @@ func ParseClaim(raw []byte) (Claim, error) {
 		AcceptsRequests: w.AcceptsRequests,
 		Nodes:           make([]ClaimNode, 0, len(w.Nodes)),
 	}
-	c.RequestSlots, _ = w.RequestSlots.clamp(0, maxSlots)
+	limit := MaxRequestSlots
+	if n, ok := w.MaxSlots.clamp(0, SlotCeiling); ok {
+		c.MaxSlots, limit = &n, n
+	}
+	c.RequestSlots, _ = w.RequestSlots.clamp(0, int64(limit))
+	if n := w.PollInterval.i32(); n != nil && *n > 0 {
+		c.PollInterval = n
+	}
 	for _, nw := range w.Nodes {
 		n, err := parseClaimNode(nw)
 		if err != nil {
