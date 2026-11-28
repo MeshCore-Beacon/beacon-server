@@ -197,3 +197,27 @@ func TestBucketTelemetry_AveragesAndNils(t *testing.T) {
 		t.Errorf("fields with no data should stay nil: %+v", b[0])
 	}
 }
+
+// A reboot row stored off the grid, then the next row stamped on arrival: the gap between them is the time that
+// passed, so the growth in it fits the rate cap. Stamped at the window start it would be 30 s and get rejected.
+func TestBucketTelemetry_RowAfterImmediateRebootRow(t *testing.T) {
+	at := func(min, sec int) int64 {
+		return telemetryBase.Add(time.Duration(min)*time.Minute + time.Duration(sec)*time.Second).UnixMilli()
+	}
+	pt := func(t int64, tx, rx float32, uptime int64) ObserverTelemetryPoint {
+		return ObserverTelemetryPoint{T: t, AirtimeTxSecs: &tx, AirtimeRxSecs: &rx, UptimeSeconds: &uptime}
+	}
+	pts := []ObserverTelemetryPoint{
+		pt(at(0, 0), 800, 6000, 10000),
+		pt(at(14, 30), 1, 10, 20),    // reboot, stored at once
+		pt(at(19, 30), 25, 190, 320), // next window's row, on arrival
+		pt(at(30, 0), 73, 550, 1220),
+	}
+	b := BucketTelemetry(pts, telemetryBase, time.Hour)
+	if len(b) != 1 {
+		t.Fatalf("got %d buckets, want 1", len(b))
+	}
+	if *b[0].AirtimeTxSecs != 73 || *b[0].AirtimeRxSecs != 550 {
+		t.Errorf("tx %v rx %v, want 73 550", *b[0].AirtimeTxSecs, *b[0].AirtimeRxSecs)
+	}
+}

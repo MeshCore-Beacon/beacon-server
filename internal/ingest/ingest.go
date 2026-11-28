@@ -245,6 +245,14 @@ type Worker struct {
 	onObserverUpsert func(ctx context.Context, observerID uuid.UUID)
 	polling          PollingSink // nil when repeater polling is off
 	uptimes          *UptimeTracker
+	now              func() time.Time // tests set it; nil is time.Now
+}
+
+func (w *Worker) clock() time.Time {
+	if w.now != nil {
+		return w.now()
+	}
+	return time.Now()
 }
 
 // New creates an ingest Worker. Call Start() to connect and begin processing.

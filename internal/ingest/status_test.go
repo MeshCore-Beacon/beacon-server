@@ -19,6 +19,7 @@ func TestStatusStatsUsable(t *testing.T) {
 		{"uptime only", `{"uptime_secs":1096701,"noise_floor":0,"tx_air_secs":0,"rx_air_secs":0,"recv_errors":0}`, false},
 		{"uptime and recv errors only", `{"uptime_secs":3834495,"recv_errors":325529}`, false},
 		{"fresh boot, no airtime yet", `{"uptime_secs":60,"noise_floor":-110,"tx_air_secs":0,"rx_air_secs":0}`, true},
+		{"negative uptime", `{"uptime_secs":-5,"noise_floor":-110,"tx_air_secs":3,"rx_air_secs":40}`, false},
 		{"no noise floor reported", `{"uptime_secs":5000,"tx_air_secs":3,"rx_air_secs":40}`, true},
 	}
 	for _, c := range cases {
