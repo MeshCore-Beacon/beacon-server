@@ -133,3 +133,25 @@ func TestDecideRequestsNeedApprovalUnlessResolvedToAll(t *testing.T) {
 		t.Errorf("no evidence: %+v", got.Assignments)
 	}
 }
+
+func TestFreeRequestSeats(t *testing.T) {
+	cases := []struct {
+		name                         string
+		open                         bool
+		slots, named, pending, wants int
+	}{
+		{"claim's own number", true, 3, 2, 0, 3},
+		{"held to what the limit leaves", true, 7, 5, 0, 3},
+		{"more targets than the limit", true, 2, 9, 0, 0},
+		{"negative slots", true, -4, 0, 0, 0},
+		{"a seat handed out, not yet claimed", true, 3, 2, 1, 2},
+		{"every seat handed out", true, 3, 2, 3, 0},
+		{"more handed out than offered", true, 1, 2, 4, 0},
+		{"expired or not taking requests", false, 5, 1, 0, 0},
+	}
+	for _, c := range cases {
+		if got := FreeRequestSeats(c.open, c.slots, c.named, c.pending); got != c.wants {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.wants)
+		}
+	}
+}

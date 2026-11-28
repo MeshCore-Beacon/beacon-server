@@ -1649,6 +1649,71 @@ func TestNodePollerPostgres(t *testing.T) {
 		t.Errorf("row without a node = %+v", e)
 	}
 
+	// Seats Beacon has handed this observer that its claim does not name yet are no longer free: 0x30 and 0x31 are
+	// requested and in use. 0x32's request is gone, 0xD the claim already names, 0x33 is another observer's.
+	u := newUser(t, ctx, s, "seats")
+	handed := func(target byte, observer []byte, inUse bool) {
+		t.Helper()
+		var req *uuid.UUID
+		if inUse {
+			id := uuid.New()
+			req = &id
+			if _, err := pool.Exec(ctx, `INSERT INTO telemetry_requests (id, user_id, target_public_key, status, created_at, updated_at, enabled_at)
+				VALUES ($1, $2, $3, 'active', now(), now(), now())`, id, u.ID, pollKey(target)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO polling_targets (target_public_key, active_request_id) VALUES ($1, $2)`, pollKey(target), req); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO polling_assignments (target_public_key, observer_public_key, rank, evidence_count, assigned_at, requested)
+			VALUES ($1, $2, 1, 0, $3, true)`, pollKey(target), observer, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	freeNow := func() int {
+		t.Helper()
+		got, err := s.GetNodePoller(ctx, pollerNode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Claim.Slots.Free
+	}
+	handed(0x30, obs, true)
+	handed(0x32, obs, false)
+	handed(0xD, obs, true)
+	handed(0x33, other, true)
+	if got := freeNow(); got != 2 {
+		t.Errorf("free with one seat handed out = %d, want 2", got)
+	}
+	handed(0x31, obs, true)
+	if got := freeNow(); got != 1 {
+		t.Errorf("free with two seats handed out = %d, want 1", got)
+	}
+	for _, b := range []byte{0x34, 0x35} {
+		handed(b, obs, true)
+	}
+	if got := freeNow(); got != 0 {
+		t.Errorf("free with more handed out than offered = %d, want 0", got)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM polling_assignments WHERE requested`); err != nil {
+		t.Fatal(err)
+	}
+	// A claim that takes no requests, or is no longer live, has no free seat whatever request_slots says.
+	if _, err := pool.Exec(ctx, `UPDATE polling_claims SET accepts_requests = false WHERE observer_public_key = $1`, obs); err != nil {
+		t.Fatal(err)
+	}
+	if got := freeNow(); got != 0 {
+		t.Errorf("free on a claim that takes no requests = %d, want 0", got)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE polling_claims SET accepts_requests = true, received_at = $2 WHERE observer_public_key = $1`,
+		obs, now.Add(-polling.ClaimTTL-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.GetNodePoller(ctx, pollerNode); err != nil || got.Claim.Live || got.Claim.Slots.Free != 0 {
+		t.Errorf("expired claim that takes requests: %+v %v", got.Claim, err)
+	}
+
 	// An expired claim is still returned, not live, with its targets. Free never goes below zero.
 	if _, err := pool.Exec(ctx, `UPDATE polling_claims SET received_at = $2, request_slots = -4, accepts_requests = false WHERE observer_public_key = $1`,
 		obs, now.Add(-polling.ClaimTTL-time.Minute)); err != nil {
@@ -1666,8 +1731,20 @@ func TestNodePollerPostgres(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE polling_claims SET request_slots = 2 WHERE observer_public_key = $1`, obs); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE polling_claims SET request_slots = 2, accepts_requests = true, received_at = $2 WHERE observer_public_key = $1`, obs, now); err != nil {
+		t.Fatal(err)
+	}
 	if got, err = s.GetNodePoller(ctx, pollerNode); err != nil || got.Claim.Slots != (api.NodePollerSlots{Max: 8, Used: 9, Own: 7, Requested: 2}) {
 		t.Errorf("over the limit: %+v %v", got.Claim, err)
+	}
+
+	// A claim with no targets still reads as a claim.
+	if _, err := pool.Exec(ctx, `DELETE FROM polling_candidates WHERE observer_public_key = $1`, obs); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = s.GetNodePoller(ctx, pollerNode); err != nil || got.Claim == nil || len(got.Targets) != 0 || got.Targets == nil ||
+		got.Claim.Slots != (api.NodePollerSlots{Max: 8, Free: 2}) || got.Readings24h != 2 {
+		t.Errorf("claim with no targets: %+v %v", got, err)
 	}
 
 	got, err = s.GetNodePoller(ctx, bare)
@@ -1676,6 +1753,79 @@ func TestNodePollerPostgres(t *testing.T) {
 	}
 	if _, err = s.GetNodePoller(ctx, uuid.New()); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("unknown node err = %v, want pgx.ErrNoRows", err)
+	}
+}
+
+// pollerGap pauses a poller read after its claim and targets statement.
+type pollerGap struct {
+	sqlc.Querier
+	arrived chan struct{}
+	release chan struct{}
+}
+
+func (g pollerGap) NodePoller(ctx context.Context, arg sqlc.NodePollerParams) ([]sqlc.NodePollerRow, error) {
+	r, err := g.Querier.NodePoller(ctx, arg)
+	g.arrived <- struct{}{}
+	<-g.release
+	return r, err
+}
+
+// A claim replaced in the middle of a read must not give the reader one claim's slots with the other's targets.
+func TestNodePollerReadIsOneSnapshotPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	obs := pollKey(1)
+	obsID := pollObserver(t, ctx, s, obs)
+	node := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO nodes (id, public_key, node_type, name) VALUES ($1, $2, 2, 'HOWL')`, node, obs); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := pool.Exec(ctx, `INSERT INTO polling_claims (observer_public_key, observer_id, accepts_requests, request_slots, claimed_at, received_at)
+		VALUES ($1, $2, true, 6, $3, $3)`, obs, obsID, now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	for b := byte(0xA); b < 0xC; b++ {
+		if _, err := pool.Exec(ctx, `INSERT INTO polling_candidates (observer_public_key, target_public_key) VALUES ($1, $2)`, obs, pollKey(b)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g := pollerGap{Querier: s.q, arrived: make(chan struct{}, 1), release: make(chan struct{})}
+	s.q = g
+	type res struct {
+		p   *api.NodePoller
+		err error
+	}
+	done := make(chan res, 1)
+	go func() {
+		p, err := s.GetNodePoller(ctx, node)
+		done <- res{p, err}
+	}()
+	select {
+	case <-g.arrived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the read never reached the gap")
+	}
+	// The next claim names six targets and has two seats left.
+	if _, err := pool.Exec(ctx, `UPDATE polling_claims SET request_slots = 2, received_at = $2 WHERE observer_public_key = $1`, obs, now); err != nil {
+		t.Fatal(err)
+	}
+	for b := byte(0xC); b < 0x10; b++ {
+		if _, err := pool.Exec(ctx, `INSERT INTO polling_candidates (observer_public_key, target_public_key) VALUES ($1, $2)`, obs, pollKey(b)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(g.release)
+	r := <-done
+	if r.err != nil || r.p.Claim == nil {
+		t.Fatalf("%+v %v", r.p, r.err)
+	}
+	old := r.p.Claim.ReceivedAt == now.Add(-time.Minute).UnixMilli()
+	want := api.NodePollerSlots{Max: 8, Used: 6, Own: 6, Free: 2}
+	if old {
+		want = api.NodePollerSlots{Max: 8, Used: 2, Own: 2, Free: 6}
+	}
+	if r.p.Claim.Slots != want || len(r.p.Targets) != want.Used {
+		t.Fatalf("slots %+v with %d targets, want %+v (old claim: %v)", r.p.Claim.Slots, len(r.p.Targets), want, old)
 	}
 }
 

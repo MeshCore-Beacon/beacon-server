@@ -41,6 +41,17 @@ func RequestCapacity(c Candidate) int {
 	return min(capacity, MaxRequestSlots)
 }
 
+// FreeRequestSeats is how many more requested targets an observer can be handed. open is false when its claim is not
+// live or takes no requests: it then has none. Otherwise it is the claim's free seats, held to what the firmware's
+// limit leaves beside the targets it names, less the seats already handed to it that its claim does not name yet.
+func FreeRequestSeats(open bool, requestSlots, named, pending int) int {
+	if !open {
+		return 0
+	}
+	free := min(max(requestSlots, 0), max(MaxRequestSlots-named, 0))
+	return max(free-max(pending, 0), 0)
+}
+
 // ElectRequested ranks the observers for a requested target. Only an observer with a live claim that accepts
 // requests, advert evidence for the target (RequestCands carry it), a free seat, no admin stop for the target, and,
 // when approvedOnly, the operator's approval may take it. It never picks more than MaxRequestedPollers. wait says

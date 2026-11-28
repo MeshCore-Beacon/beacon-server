@@ -420,28 +420,37 @@ JOIN observers o ON o.public_key = a.observer_public_key
 WHERE a.target_public_key = $1
 ORDER BY a.rank, o.id;
 
--- name: NodePollerClaim :one
--- The observer's stored claim, live or expired, with how many readings it delivered since readings_after.
-SELECT cl.received_at, cl.accepts_requests, cl.request_slots::int AS request_slots,
-       (SELECT count(*) FROM repeater_readings r
-        WHERE r.observer_public_key = cl.observer_public_key AND r.received_at > sqlc.arg(readings_after))::int AS readings
-FROM polling_claims cl
-WHERE cl.observer_public_key = sqlc.arg(observer_public_key);
-
--- name: NodePollerTargets :many
--- The targets the observer's claim names, assigned ones first by rank. rank is NULL when the observer holds no
--- assignment for the target. Evidence is the assignment's, frozen at the election. latest_reading_at is the newest
--- reading this observer delivered for the target, trusted or not. name is '' when the target has no node row or name.
-SELECT c.target_public_key, c.requested, c.state, c.misses::int AS misses, c.last_attempt, c.last_ok, c.claimed_snr,
+-- name: NodePoller :many
+-- The observer's stored claim, live or expired, and the targets it names, in one statement so they come from one
+-- snapshot. No claim gives no rows; a claim that names nothing gives one row with a NULL target. readings is how
+-- many readings the observer delivered since readings_after. pending_seats counts the requested targets it has
+-- been handed, for a request still in use, that its claim does not name yet.
+-- Targets come assigned ones first by rank. rank is NULL when the observer holds no assignment for the target.
+-- Evidence is the assignment's, frozen at the election. latest_reading_at is the newest reading this observer
+-- delivered for the target, trusted or not. name is '' when the target has no node row or name.
+WITH cl AS MATERIALIZED (
+    SELECT p.observer_public_key, p.received_at, p.accepts_requests, p.request_slots::int AS request_slots,
+           (SELECT count(*) FROM repeater_readings r
+            WHERE r.observer_public_key = p.observer_public_key AND r.received_at > sqlc.arg(readings_after))::int AS readings,
+           (SELECT count(*) FROM polling_assignments x
+            JOIN polling_targets pt ON pt.target_public_key = x.target_public_key AND pt.active_request_id IS NOT NULL
+            WHERE x.observer_public_key = p.observer_public_key AND x.requested
+              AND NOT EXISTS (SELECT 1 FROM polling_candidates h
+                              WHERE h.observer_public_key = x.observer_public_key AND h.target_public_key = x.target_public_key))::int AS pending_seats
+    FROM polling_claims p
+    WHERE p.observer_public_key = sqlc.arg(observer_public_key)
+)
+SELECT cl.received_at, cl.accepts_requests, cl.request_slots, cl.readings, cl.pending_seats,
+       c.target_public_key, c.requested, c.state, c.misses, c.last_attempt, c.last_ok, c.claimed_snr,
        a.rank, a.evidence_snr, COALESCE(a.evidence_count, 0)::int AS evidence_count,
        n.id AS node_id, COALESCE(n.name, '')::text AS name,
        (SELECT r.sampled_at FROM repeater_readings r
         WHERE r.target_public_key = c.target_public_key AND r.observer_public_key = c.observer_public_key
         ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_reading_at
-FROM polling_candidates c
+FROM cl
+LEFT JOIN polling_candidates c ON c.observer_public_key = cl.observer_public_key
 LEFT JOIN polling_assignments a ON a.target_public_key = c.target_public_key AND a.observer_public_key = c.observer_public_key
 LEFT JOIN nodes n ON n.public_key = c.target_public_key
-WHERE c.observer_public_key = sqlc.arg(observer_public_key)
 ORDER BY a.rank NULLS LAST, lower(NULLIF(n.name, '')) NULLS LAST, c.target_public_key;
 
 -- name: NodeLatestTrustedReadingAt :one

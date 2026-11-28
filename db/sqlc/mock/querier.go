@@ -4566,34 +4566,19 @@ func (mr *MockQuerierMockRecorder) NodeLatestTrustedReadingAt(ctx, targetPublicK
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodeLatestTrustedReadingAt", reflect.TypeOf((*MockQuerier)(nil).NodeLatestTrustedReadingAt), ctx, targetPublicKey)
 }
 
-// NodePollerClaim mocks base method.
-func (m *MockQuerier) NodePollerClaim(ctx context.Context, arg db.NodePollerClaimParams) (db.NodePollerClaimRow, error) {
+// NodePoller mocks base method.
+func (m *MockQuerier) NodePoller(ctx context.Context, arg db.NodePollerParams) ([]db.NodePollerRow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "NodePollerClaim", ctx, arg)
-	ret0, _ := ret[0].(db.NodePollerClaimRow)
+	ret := m.ctrl.Call(m, "NodePoller", ctx, arg)
+	ret0, _ := ret[0].([]db.NodePollerRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// NodePollerClaim indicates an expected call of NodePollerClaim.
-func (mr *MockQuerierMockRecorder) NodePollerClaim(ctx, arg any) *gomock.Call {
+// NodePoller indicates an expected call of NodePoller.
+func (mr *MockQuerierMockRecorder) NodePoller(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodePollerClaim", reflect.TypeOf((*MockQuerier)(nil).NodePollerClaim), ctx, arg)
-}
-
-// NodePollerTargets mocks base method.
-func (m *MockQuerier) NodePollerTargets(ctx context.Context, observerPublicKey []byte) ([]db.NodePollerTargetsRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "NodePollerTargets", ctx, observerPublicKey)
-	ret0, _ := ret[0].([]db.NodePollerTargetsRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// NodePollerTargets indicates an expected call of NodePollerTargets.
-func (mr *MockQuerierMockRecorder) NodePollerTargets(ctx, observerPublicKey any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodePollerTargets", reflect.TypeOf((*MockQuerier)(nil).NodePollerTargets), ctx, observerPublicKey)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodePoller", reflect.TypeOf((*MockQuerier)(nil).NodePoller), ctx, arg)
 }
 
 // NodePollingAssignments mocks base method.

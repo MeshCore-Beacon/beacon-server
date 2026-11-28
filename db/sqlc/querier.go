@@ -700,12 +700,14 @@ type Querier interface {
 	NodeHasReadings(ctx context.Context, targetPublicKey []byte) (bool, error)
 	NodeIDsByKeys(ctx context.Context, dollar_1 [][]byte) ([]NodeIDsByKeysRow, error)
 	NodeLatestTrustedReadingAt(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error)
-	// The observer's stored claim, live or expired, with how many readings it delivered since readings_after.
-	NodePollerClaim(ctx context.Context, arg NodePollerClaimParams) (NodePollerClaimRow, error)
-	// The targets the observer's claim names, assigned ones first by rank. rank is NULL when the observer holds no
-	// assignment for the target. Evidence is the assignment's, frozen at the election. latest_reading_at is the newest
-	// reading this observer delivered for the target, trusted or not. name is '' when the target has no node row or name.
-	NodePollerTargets(ctx context.Context, observerPublicKey []byte) ([]NodePollerTargetsRow, error)
+	// The observer's stored claim, live or expired, and the targets it names, in one statement so they come from one
+	// snapshot. No claim gives no rows; a claim that names nothing gives one row with a NULL target. readings is how
+	// many readings the observer delivered since readings_after. pending_seats counts the requested targets it has
+	// been handed, for a request still in use, that its claim does not name yet.
+	// Targets come assigned ones first by rank. rank is NULL when the observer holds no assignment for the target.
+	// Evidence is the assignment's, frozen at the election. latest_reading_at is the newest reading this observer
+	// delivered for the target, trusted or not. name is '' when the target has no node row or name.
+	NodePoller(ctx context.Context, arg NodePollerParams) ([]NodePollerRow, error)
 	// Assigned observers of one target by rank. An assignment whose observer has no row is left out.
 	NodePollingAssignments(ctx context.Context, targetPublicKey []byte) ([]NodePollingAssignmentsRow, error)
 	NodePublicKey(ctx context.Context, id uuid.UUID) ([]byte, error)
