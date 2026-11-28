@@ -1,0 +1,22 @@
+[
+ "Sort",
+ "  Seq Scan on polling_claims p [InitPlan]",
+ "    Aggregate partial=Simple [SubPlan]",
+ "      Index Only Scan on repeater_readings r using idx_repeater_readings_observer_received scan=Forward",
+ "    Aggregate partial=Simple [SubPlan]",
+ "      Nested Loop (Anti)",
+ "        Nested Loop",
+ "          Index Scan on polling_assignments x using idx_polling_assignments_observer_requested scan=Forward",
+ "          Seq Scan on polling_targets pt",
+ "        Index Only Scan on polling_candidates h using polling_candidates_pkey scan=Forward",
+ "  Nested Loop (Left)",
+ "    Nested Loop (Left)",
+ "      Nested Loop (Left)",
+ "        CTE Scan",
+ "        Bitmap Heap Scan on polling_candidates c",
+ "          Bitmap Index Scan using polling_candidates_pkey",
+ "      Index Scan on polling_assignments a using polling_assignments_pkey scan=Forward",
+ "    Index Scan on nodes n using nodes_public_key_key scan=Forward",
+ "    Limit [SubPlan]",
+ "      Index Only Scan on repeater_readings r_1 using idx_repeater_readings_target_observer scan=Forward"
+]
