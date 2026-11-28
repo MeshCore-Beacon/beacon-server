@@ -37,6 +37,7 @@ type stubReader struct {
 	getObserverTelemetryBucketed func(ctx context.Context, observerID uuid.UUID, since, until time.Time, bucketHours int32) ([]api.ObserverTelemetryPoint, error)
 	getNodeReadings              func(ctx context.Context, nodeID uuid.UUID, since, until time.Time, includeUntrusted bool) ([]api.NodeReading, bool, int, error)
 	getNodePolling               func(ctx context.Context, nodeID uuid.UUID) (*api.NodePolling, error)
+	getNodePoller                func(ctx context.Context, nodeID uuid.UUID) (*api.NodePoller, error)
 	listLatestNodeReadings       func(ctx context.Context, iatas []string, since time.Time) ([]api.NodeLatestReading, error)
 	getObserverActivity          func(ctx context.Context, observerID uuid.UUID, window, interval time.Duration, until time.Time) (*api.ObserverActivity, error)
 	getObserverScopes            func(ctx context.Context, observerID uuid.UUID) ([]string, error)
@@ -204,6 +205,13 @@ func (s stubReader) GetNodePolling(ctx context.Context, nodeID uuid.UUID) (*api.
 		return s.getNodePolling(ctx, nodeID)
 	}
 	return &api.NodePolling{}, nil
+}
+
+func (s stubReader) GetNodePoller(ctx context.Context, nodeID uuid.UUID) (*api.NodePoller, error) {
+	if s.getNodePoller != nil {
+		return s.getNodePoller(ctx, nodeID)
+	}
+	return &api.NodePoller{}, nil
 }
 
 func (s stubReader) GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, since, until time.Time, afterID int64) (*api.ObserverTelemetry, error) {

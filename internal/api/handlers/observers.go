@@ -191,7 +191,7 @@ func listObserverAdverts(reader api.Reader) http.HandlerFunc {
 //	@Param		observerId	path		string	true	"Observer UUID"
 //	@Param		range		query		string	false	"Duration window e.g. 24h, 48h, 168h (default 24h)"
 //	@Param		afterId		query		int		false	"Return points after this telemetry ID for WS reconnection backfill"
-//	@Param		interval	query		string	false	"Bucketing interval: 1h (default), 6h, or 24h"
+//	@Param		interval	query		string	false	"1h (default) returns the stored snapshots as they are: one per telemetry.resolution window (15 minutes by default) plus a row at the moment of each reboot, so points are not evenly spaced. 6h and 24h return buckets of that size"
 //	@Success	200			{object}	api.ObserverTelemetry
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError

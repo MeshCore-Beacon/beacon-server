@@ -27,6 +27,7 @@ import (
 // GET  /nodes/{nodeId}/activity     → getNodeActivity
 // GET  /nodes/{nodeId}/telemetry    → getNodeTelemetry
 // GET  /nodes/{nodeId}/polling      → getNodePolling
+// GET  /nodes/{nodeId}/poller       → getNodePoller
 //
 // With pollingEnabled false the telemetry and polling routes answer as for a node nobody polls,
 // without reading the readings or assignments.
@@ -44,6 +45,7 @@ func NodesRouter(reader api.Reader, pollingEnabled bool) http.Handler {
 		r.Get("/activity", getNodeActivity(reader))
 		r.Get("/telemetry", getNodeTelemetry(telemetryReader))
 		r.Get("/polling", getNodePolling(telemetryReader))
+		r.Get("/poller", getNodePoller(telemetryReader))
 		r.Get("/neighbors", listNodeNeighbors(reader))
 	})
 	return r
@@ -74,6 +76,13 @@ func (u unpolledReader) GetNodePolling(ctx context.Context, nodeID uuid.UUID) (*
 		return nil, err
 	}
 	return &api.NodePolling{}, nil
+}
+
+func (u unpolledReader) GetNodePoller(ctx context.Context, nodeID uuid.UUID) (*api.NodePoller, error) {
+	if err := u.exists(ctx, nodeID); err != nil {
+		return nil, err
+	}
+	return &api.NodePoller{Targets: []api.NodePollerTarget{}}, nil
 }
 
 // latestReadingsWindow is how old a reading the latest readings route still returns.
@@ -571,6 +580,46 @@ func getNodePolling(reader api.Reader) http.HandlerFunc {
 		}
 		if out.Standbys == nil {
 			out.Standbys = []api.NodePollingObserver{}
+		}
+		respond(w, http.StatusOK, out)
+	}
+}
+
+// getNodePoller godoc
+//
+//	@Summary		Get what a node polls
+//	@Description	For a node that is an observer with a polling claim: its newest claim with slot usage, the readings it delivered in the last 24 hours, and one row per repeater the claim names, assigned ones first by rank. An expired claim is still returned with live false while it is stored. claim is null and targets is empty when the node has no claim or polling is off.
+//	@Tags			Nodes
+//	@Produce		json
+//	@Param			nodeId	path		string	true	"Node UUID"
+//	@Success		200		{object}	api.NodePoller
+//	@Failure		400		{object}	handlers.APIError
+//	@Failure		404		{object}	handlers.APIError
+//	@Failure		500		{object}	handlers.APIError
+//	@Failure		503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
+//	@Router			/nodes/{nodeId}/poller [get]
+func getNodePoller(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		nodeID, err := uuid.Parse(chi.URLParam(r, "nodeId"))
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid node ID")
+			return
+		}
+		out, err := reader.GetNodePoller(r.Context(), nodeID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondError(w, http.StatusNotFound, "node not found")
+			return
+		}
+		if err != nil {
+			respondReaderError(w, err, "internal server error")
+			return
+		}
+		if out == nil {
+			respondError(w, http.StatusNotFound, "node not found")
+			return
+		}
+		if out.Targets == nil {
+			out.Targets = []api.NodePollerTarget{}
 		}
 		respond(w, http.StatusOK, out)
 	}

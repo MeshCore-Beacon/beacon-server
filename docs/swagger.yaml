@@ -428,6 +428,7 @@ definitions:
         - heard
         - observer
         - telemetry
+        - poller
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasPinInput:
@@ -461,6 +462,7 @@ definitions:
         - heard
         - observer
         - telemetry
+        - poller
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ChangeEmailRequest:
@@ -773,6 +775,11 @@ definitions:
       atlas7d:
         description: Atlas7d is true when the server accepts the 7d Atlas range. Always
           true on this version.
+        example: true
+        type: boolean
+      atlasPoller:
+        description: AtlasPoller is true when the server accepts the poller view on
+          Atlas pins. Always true on this version.
         example: true
         type: boolean
       atlasTelemetry:
@@ -1192,6 +1199,88 @@ definitions:
         - name
         - type
         - neighbors
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodePoller:
+    properties:
+      claim:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollerClaim'
+      readings24h:
+        description: readings it delivered in the last 24 h
+        type: integer
+      targets:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollerTarget'
+        type: array
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollerClaim:
+    properties:
+      acceptsRequests:
+        type: boolean
+      live:
+        type: boolean
+      receivedAt:
+        description: epoch ms
+        type: integer
+      slots:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollerSlots'
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollerSlots:
+    properties:
+      free:
+        description: 'seats a request can still take: 0 unless the claim is live and
+          accepts requests, less those handed out but not yet claimed'
+        type: integer
+      max:
+        type: integer
+      own:
+        description: targets the poller chose itself
+        type: integer
+      requested:
+        description: targets it polls for a request
+        type: integer
+      used:
+        description: targets the claim names
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollerTarget:
+    properties:
+      claimedSnr:
+        type: number
+      evidenceCount:
+        type: integer
+      evidenceSnr:
+        description: as of the last election
+        type: number
+      lastAttempt:
+        description: epoch ms, null when never
+        type: integer
+      lastOk:
+        description: epoch ms, null when never
+        type: integer
+      latestReadingAt:
+        description: newest reading this poller delivered, epoch ms
+        type: integer
+      misses:
+        type: integer
+      name:
+        type: string
+      nodeId:
+        description: null when the target has no node row
+        type: string
+      publicKey:
+        type: string
+      rank:
+        type: integer
+      requested:
+        type: boolean
+      role:
+        enum:
+        - poller
+        - standby
+        - unassigned
+        type: string
+      state:
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.NodePolling:
@@ -2105,6 +2194,10 @@ definitions:
       configPaused:
         description: polling.paused in config, which pauses regardless
         type: boolean
+      evidenceWindowSeconds:
+        description: 'polling.evidence_window in seconds: how far back zero-hop adverts
+          count as advert evidence.'
+        type: integer
       excludedNodes:
         items:
           type: string
@@ -6354,6 +6447,45 @@ paths:
       summary: List packet observations originating from a node
       tags:
       - Nodes
+  /nodes/{nodeId}/poller:
+    get:
+      description: 'For a node that is an observer with a polling claim: its newest
+        claim with slot usage, the readings it delivered in the last 24 hours, and
+        one row per repeater the claim names, assigned ones first by rank. An expired
+        claim is still returned with live false while it is stored. claim is null
+        and targets is empty when the node has no claim or polling is off.'
+      parameters:
+      - description: Node UUID
+        in: path
+        name: nodeId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePoller'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Get what a node polls
+      tags:
+      - Nodes
   /nodes/{nodeId}/polling:
     get:
       description: The observer assigned to poll the node (null when nobody is), its
@@ -6717,7 +6849,10 @@ paths:
         in: query
         name: afterId
         type: integer
-      - description: 'Bucketing interval: 1h (default), 6h, or 24h'
+      - description: '1h (default) returns the stored snapshots as they are: one per
+          telemetry.resolution window (15 minutes by default) plus a row at the moment
+          of each reboot, so points are not evenly spaced. 6h and 24h return buckets
+          of that size'
         in: query
         name: interval
         type: string

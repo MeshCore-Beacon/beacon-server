@@ -39,6 +39,7 @@ func TestValidateAtlasPut(t *testing.T) {
 		{"empty", PutAtlasRequest{Range: "3d"}, ""},
 		{"tiles and view", PutAtlasRequest{Range: "24h", Pins: []AtlasPinInput{{Kind: "node", PublicKey: key(1), Tiles: tiles, View: str("observer")}}}, ""},
 		{"telemetry view", PutAtlasRequest{Range: "24h", Pins: []AtlasPinInput{{Kind: "node", PublicKey: key(1), View: str("telemetry")}}}, ""},
+		{"poller view", PutAtlasRequest{Range: "24h", Pins: []AtlasPinInput{{Kind: "node", PublicKey: key(1), View: str("poller")}}}, ""},
 		{"telemetry tiles", PutAtlasRequest{Range: "24h", Pins: []AtlasPinInput{{Kind: "node", PublicKey: key(1), TelemetryTiles: ttiles}}}, ""},
 		{"telemetry tiles with tiles", PutAtlasRequest{Range: "24h", Pins: []AtlasPinInput{{Kind: "node", PublicKey: key(1), Tiles: tiles, TelemetryTiles: ttiles, View: str("telemetry")}}}, ""},
 		{"three telemetry tiles", PutAtlasRequest{Range: "24h", Pins: []AtlasPinInput{{Kind: "node", PublicKey: key(1), TelemetryTiles: ttiles[:3]}}}, "telemetryTiles"},

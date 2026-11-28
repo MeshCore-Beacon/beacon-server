@@ -40,7 +40,7 @@ type AtlasPin struct {
 	ObserverID        *string  `json:"observerId" extensions:"x-nullable"`
 	Name              string   `json:"name"`
 	Tiles             []string `json:"tiles,omitempty"`
-	View              string   `json:"view,omitempty" enums:"heard,observer,telemetry"`
+	View              string   `json:"view,omitempty" enums:"heard,observer,telemetry,poller"`
 	// TelemetryTiles are the four tiles of a node pin's Telemetry view; absent means the client's default.
 	TelemetryTiles []string `json:"telemetryTiles,omitempty" enums:"battery,noise,uptime,airtime,temperature,packets,signal,errors"`
 }
@@ -92,7 +92,7 @@ type AtlasPinInput struct {
 	ObserverPublicKey string   `json:"observerPublicKey"`
 	Name              string   `json:"name"`
 	Tiles             []string `json:"tiles"`
-	View              *string  `json:"view" enums:"heard,observer,telemetry"`
+	View              *string  `json:"view" enums:"heard,observer,telemetry,poller"`
 	// TelemetryTiles is four distinct ids from battery, noise, uptime, airtime, temperature, packets, signal, errors.
 	// Node pins only.
 	TelemetryTiles []string `json:"telemetryTiles"`
@@ -228,8 +228,8 @@ func ValidateAtlasPut(req PutAtlasRequest, observerKeys map[uuid.UUID][]byte, li
 			sp.TelemetryTiles = in.TelemetryTiles
 		}
 		if in.View != nil {
-			if *in.View != "heard" && *in.View != "observer" && *in.View != "telemetry" {
-				return "", nil, bad("view must be heard, observer or telemetry")
+			if *in.View != "heard" && *in.View != "observer" && *in.View != "telemetry" && *in.View != "poller" {
+				return "", nil, bad("view must be heard, observer, telemetry or poller")
 			}
 			if in.Kind == PinNode {
 				sp.View = *in.View

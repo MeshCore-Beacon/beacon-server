@@ -64,10 +64,10 @@ type statusStats struct {
 }
 
 // usable reports whether the stats carry real radio readings. A running observer
-// never reports zero uptime, and a live radio never reads a 0 dB noise floor, so
+// never reports zero or negative uptime, and a live radio never reads a 0 dB noise floor, so
 // that with zero airtime marks a status sent before the radio stats were filled in.
 func (s statusStats) usable() bool {
-	if s.UptimeSeconds == 0 {
+	if s.UptimeSeconds <= 0 {
 		return false
 	}
 	return s.NoiseFloor != 0 || s.TxAirSecs != 0 || s.RxAirSecs != 0
@@ -194,10 +194,10 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 		StatusMetadata: raw,
 		LastStatusAt:   time.Now(),
 	}
-	// A running observer never reports 0, so treat this the same as a missing
+	// A running observer never reports 0 or less, so treat this the same as a missing
 	// stats object and leave the existing value alone (COALESCE in the SQL)
 	// rather than stomping it with a zero.
-	if envelope.Stats.UptimeSeconds != 0 {
+	if envelope.Stats.UptimeSeconds > 0 {
 		params.UptimeSeconds = &envelope.Stats.UptimeSeconds
 	}
 	if envelope.Stats.BatteryMV != 0 {
@@ -254,30 +254,37 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 		return
 	}
 	// Store a telemetry snapshot at the configured resolution. Partial stats are
-	// skipped rather than written as zeros that would win the hourly dedup and
+	// skipped rather than written as zeros that would win the window's dedup and
 	// pollute the telemetry aggregates.
 	if !envelope.Stats.usable() {
 		w.log.Debug("status has no usable stats; skipping telemetry insert")
 	} else {
 		resolution := w.cfg.TelemetryResolution
 		if resolution == 0 {
-			resolution = time.Hour
+			resolution = DefaultTelemetryResolution
 		}
-		reportedAt := time.Now().Truncate(resolution)
-		batteryMV := int32(envelope.Stats.BatteryMV)
-		txAirSecs := float32(envelope.Stats.TxAirSecs)
-		rxAirSecs := float32(envelope.Stats.RxAirSecs)
-		queueLen := int32(envelope.Stats.QueueLen)
-		debugFlags := int32(envelope.Stats.DebugFlags)
-		recvErrors := int32(envelope.Stats.RecvErrors)
+		// A reboot is stored at once, not held for the next window: alerts read these rows.
+		snap := w.uptimes.Begin(pubkeyHex, envelope.Stats.UptimeSeconds, w.clock().Truncate(time.Second), resolution)
+		stored := true
+		if snap.Store {
+			batteryMV := int32(envelope.Stats.BatteryMV)
+			txAirSecs := float32(envelope.Stats.TxAirSecs)
+			rxAirSecs := float32(envelope.Stats.RxAirSecs)
+			queueLen := int32(envelope.Stats.QueueLen)
+			debugFlags := int32(envelope.Stats.DebugFlags)
+			recvErrors := int32(envelope.Stats.RecvErrors)
 
-		if err := w.db.InsertObserverTelemetry(
-			ctx, observerID, reportedAt, &batteryMV, &txAirSecs, &rxAirSecs,
-			envelope.Stats.NoiseFloor, envelope.Stats.UptimeSeconds,
-			&queueLen, &debugFlags, &recvErrors,
-		); err != nil {
-			w.log.Error(fmt.Sprintf("db: insert telemetry failed for %s", pubkeyHex), "error", err)
+			if err := w.db.InsertObserverTelemetry(
+				ctx, observerID, snap.At, &batteryMV, &txAirSecs, &rxAirSecs,
+				envelope.Stats.NoiseFloor, envelope.Stats.UptimeSeconds,
+				&queueLen, &debugFlags, &recvErrors,
+			); err != nil {
+				stored = false
+				w.log.Error(fmt.Sprintf("db: insert telemetry failed for %s", pubkeyHex), "error", err)
+			}
 		}
+		// A failed insert is not recorded, so the other broker's copy can still store it.
+		snap.Done(stored)
 	}
 
 	iata, err := w.db.GetObserverLastIATA(ctx, observerID)

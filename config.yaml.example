@@ -273,7 +273,13 @@ atlas:
 
 telemetry:
   retention: 744h   # 31 days
-  resolution: 1h    # store one snapshot per observer per hour
+  # How often an observer's status is stored as a snapshot (default 15m). Observers report
+  # every 5 minutes by default; reports inside one window are dropped, except the first after
+  # a reboot. Observer alerts and charts read these snapshots:
+  #   - battery and noise alerts need two snapshots in a row, so they react after about two windows
+  #   - a shorter window stores more rows (5m is about 3x the rows of 15m, 1h about a quarter)
+  #   - below the observers' report interval nothing more is stored
+  resolution: 15m
 
 # Optional authenticated database/config downloads. Disabled unless explicitly enabled.
 # Requires auth.api_key, a supported PostgreSQL URL and a compatible pg_dump client.
@@ -426,50 +432,52 @@ cache:
 #web:
 #  min_web_version: "2.3.0"   # Beacon Web; built-in floor: 2.3.0
 
-# Repeater polling: asks repeaters for telemetry over MQTT. Disabled by default.
-# Bounds follow the firmware clamps. Zero or omitted values use the defaults.
+# Repeater polling: observers ask nearby repeaters for battery, temperature and counters, and
+# Beacon picks which observer polls which repeater and stores the readings. Off by default.
+# Zero or omitted values use the defaults. Ranges match what the observer firmware accepts.
 #polling:
-#  enabled: false
-#  mqtt_hosts: []              # up to 4 plain hostnames, no port; required when enabled
-#  direct_window: 1h           # 30m to 24h; default: 1h
-#  grace: 30m                  # 10m to 2h; default: 30m
-#  max_requests: 2             # 1 to 3; default: 2
-#  reading_retention: 744h     # at least 1h; default: 744h (31 days)
-#  min_client_version: ""      # X.Y.Z or empty; older observer firmware gets version_ok false
-#  excluded_nodes: []          # up to 16 public keys, 64 hex characters each
-#  paused: false
-#  authority: evidence         # evidence or approved; approved elects only observers you approve
-#  requests_per_user: 6        # telemetry requests one user may hold; 0 turns requests off
-#  offline_disable_days: 7     # a request is disabled when no observer has heard its repeater for this long
-#  request_observers: all      # all (default) or approved. all: any observer with advert evidence for a requested
-#                              # repeater can be handed it and its guest password. approved: only observers you
-#                              # approve under /api/v1/admin/polling; advert evidence is required in both modes.
+#  enabled: false              # turn repeater polling on; needs mqtt_hosts
+#  mqtt_hosts: []              # brokers your observers publish to: plain hostnames, no port, up to 4
+#  direct_window: 1h           # poll a repeater again once its newest reading is this old; 30m to 24h
+#  grace: 30m                  # extra wait for each standby before it steps in for the poller; 10m to 2h
+#  max_requests: 2             # poll attempts per repeater in each window; 1 to 3
+#  reading_retention: 744h     # how long readings are kept; at least 1h (default 31 days)
+#  min_client_version: ""      # oldest observer firmware allowed to poll, as X.Y.Z; empty allows all
+#  excluded_nodes: []          # repeaters that are never polled; up to 16 public keys, 64 hex characters each
+#  paused: false               # true tells every observer to stop polling, without turning the feature off
+#  authority: evidence         # who can be chosen to poll. evidence: any observer, ranked by how well Beacon
+#                              # has heard the repeater through it. approved: only observers you approve
+#  evidence_window: 168h       # how far back a repeater's zero-hop adverts count as proof an observer hears
+#                              # it; 24h to 720h. Adverts older than packets.retention are gone either way
+#
+#  # Telemetry requests: signed-in users ask for a repeater to be polled. They also need accounts on
+#  # and BEACON_SECRET_KEY in .env (32 random bytes in base64, from: openssl rand -base64 32).
+#  # Losing or changing the key makes the stored guest passwords unreadable.
+#  requests_per_user: 6        # repeaters one user may ask to have polled; 0 to 20, 0 turns requests off
+#  offline_disable_days: 7     # days no observer hears a repeater before its requests are switched off; 1 to 365
+#  request_observers: all      # which observers may be handed a requested repeater and its guest password.
+#                              # all: any observer Beacon has heard the repeater through.
+#                              # approved: only observers you approve under /api/v1/admin/polling.
 #                              # Set approved if you want to vet observers before they receive guest passwords.
-#                              # Requests also need accounts on and BEACON_SECRET_KEY (32 random bytes, base64)
 
 # Outgoing mail: the SMTP server Beacon sends account mail (sign-up, password reset) and email alerts
 # through. Required when accounts.mode is local. The password comes from BEACON_SMTP_PASSWORD.
 #mail:
-#  host: ""                    # e.g. smtp.example.org
-#  port: 587                   # default: 587
-#  username: ""                # empty means no auth
-#  from: ""                    # e.g. "Beacon <no-reply@example.org>"
-#  starttls: true              # default: true; the send fails if the server lacks STARTTLS
+#  host: ""                    # your SMTP server, e.g. smtp.example.org
+#  port: 587                   # SMTP port; default: 587
+#  username: ""                # SMTP login; empty sends without signing in
+#  from: ""                    # the sender people see, e.g. "Beacon <no-reply@example.org>"
+#  starttls: true              # require an encrypted connection; the send fails if the server lacks STARTTLS
 
 # User accounts: sign-in for the web app and the mobile app. Off by default; with it off
 # no account route is served. Mode local sends mail through the mail block above.
 #accounts:
-#  mode: off                   # off, local or portal
-#  public_url: ""              # https URL of the web app, no path; used in mailed links and as the portal callback
-#  registration: open          # open or closed
-#  # mode portal: users sign in through a portal; no passwords, no registration, no SMTP needed.
-#  # The client secret comes from BEACON_PORTAL_SECRET.
-#  portal:
-#    url: ""                   # https base URL of the portal
-#    client_id: ""             # this instance's client id at the portal
+#  mode: off                   # off, or local for sign-up with username, email and password
+#  public_url: ""              # https URL of the web app, no path; used in mailed links
+#  registration: open          # open: anyone can sign up. closed: no new sign-ups, existing users still sign in
 
-# Alerts on Atlas radios (gone quiet, low battery, reboots and more). Both channels need accounts
-# (local or portal); each user picks which ones reach them.
+# Alerts on Atlas radios (gone quiet, low battery, reboots and more). Both channels need accounts;
+# each user picks which ones reach them.
 alerts:
   email:
     # Send alerts by email. Needs accounts.mode: local and the top-level mail block.

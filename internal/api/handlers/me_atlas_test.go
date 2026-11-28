@@ -158,6 +158,19 @@ func TestMeAtlas(t *testing.T) {
 	if w := call(h, "PUT", "/me/atlas", `{"baseRevision":4,"range":"30d","pins":[]}`, c...); w.Code != 422 || !strings.Contains(w.Body.String(), "range must be 24h, 3d or 7d") {
 		t.Fatalf("bad range: %d %s", w.Code, w.Body)
 	}
+
+	// The poller view saves and reads back; a view the server does not know is 422.
+	w = call(h, "PUT", "/me/atlas", `{"baseRevision":4,"range":"7d","pins":[{"kind":"node","publicKey":"`+keyA+`","view":"poller"}]}`, c...)
+	if pin = jsonBody(t, w)["pins"].([]any)[0].(map[string]any); w.Code != 200 || pin["view"] != "poller" {
+		t.Fatalf("poller put: %d %s", w.Code, w.Body)
+	}
+	w = call(h, "GET", "/me/atlas", "", c...)
+	if pin = jsonBody(t, w)["pins"].([]any)[0].(map[string]any); w.Code != 200 || pin["view"] != "poller" {
+		t.Fatalf("poller get: %d %s", w.Code, w.Body)
+	}
+	if w := call(h, "PUT", "/me/atlas", `{"baseRevision":5,"range":"7d","pins":[{"kind":"node","publicKey":"`+keyA+`","view":"both"}]}`, c...); w.Code != 422 || !strings.Contains(w.Body.String(), "view must be heard, observer, telemetry or poller") {
+		t.Fatalf("bad view: %d %s", w.Code, w.Body)
+	}
 }
 
 func TestMeAtlasGuards(t *testing.T) {

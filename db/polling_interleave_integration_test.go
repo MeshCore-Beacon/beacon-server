@@ -432,7 +432,7 @@ func checkOlderHoldsSeat(t *testing.T, w *reqWorld) (string, int) {
 	LEFT JOIN polling_assignments x ON x.observer_public_key = b.observer_public_key AND x.requested
 	LEFT JOIN age ON age.target_public_key = x.target_public_key
 	GROUP BY b.target_public_key, b.observer_public_key, b.oldest, b.capacity`,
-		w.now.Add(-polling.ClaimTTL), w.now.Add(-polling.EvidenceWindow))
+		w.now.Add(-polling.ClaimTTL), w.now.Add(-config.DefaultEvidenceWindow))
 	if err != nil {
 		t.Fatal(err)
 	}

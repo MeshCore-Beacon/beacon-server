@@ -160,6 +160,14 @@ type stubDB struct {
 	upsertChannelErr           error
 	addCalls                   []addCall
 	addErr                     error
+	telemetry                  []telemetryRow
+	telemetryErrs              []error // one per InsertObserverTelemetry call, in order
+}
+
+// telemetryRow is one InsertObserverTelemetry call that worked.
+type telemetryRow struct {
+	at     time.Time
+	uptime int64
 }
 
 // addCall is one AddChannelMessageIATA call.
@@ -232,7 +240,15 @@ func (s *stubDB) UpdateObserverStatus(_ context.Context, _ UpdateObserverStatusP
 
 func (s *stubDB) GetObserverLastIATA(_ context.Context, _ uuid.UUID) (string, error) { return "", nil }
 
-func (s *stubDB) InsertObserverTelemetry(_ context.Context, _ uuid.UUID, _ time.Time, _ *int32, _, _ *float32, _ float32, _ int64, _, _, _ *int32) error {
+func (s *stubDB) InsertObserverTelemetry(_ context.Context, _ uuid.UUID, reportedAt time.Time, _ *int32, _, _ *float32, _ float32, uptime int64, _, _, _ *int32) error {
+	if len(s.telemetryErrs) > 0 {
+		err := s.telemetryErrs[0]
+		s.telemetryErrs = s.telemetryErrs[1:]
+		if err != nil {
+			return err
+		}
+	}
+	s.telemetry = append(s.telemetry, telemetryRow{reportedAt, uptime})
 	return nil
 }
 

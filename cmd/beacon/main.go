@@ -420,6 +420,7 @@ func main() {
 		slog.Info("config: ingest filter inactive — accepting all IATAs", "component", "startup")
 	}
 
+	uptimes := ingest.NewUptimeTracker() // one for both brokers: each delivers the same status
 	broker1 := ingest.New(
 		ingest.Config{
 			BrokerName:          "mqtt1",
@@ -428,6 +429,7 @@ func main() {
 			Username:            getEnv("MQTT_BROKER_1_USERNAME"),
 			Password:            getEnv("MQTT_BROKER_1_PASSWORD"),
 			TelemetryResolution: resolved.TelemetryResolution,
+			Uptimes:             uptimes,
 			AllowedIATAs:        allowedIATAs,
 		},
 		coalescer,
@@ -444,6 +446,7 @@ func main() {
 			Username:            getEnv("MQTT_BROKER_2_USERNAME"),
 			Password:            getEnv("MQTT_BROKER_2_PASSWORD"),
 			TelemetryResolution: resolved.TelemetryResolution,
+			Uptimes:             uptimes,
 			AllowedIATAs:        allowedIATAs,
 		},
 		coalescer,
@@ -754,7 +757,8 @@ func main() {
 			"/db":       handlers.DBAdminRouter(maintStore, pgSource),
 			"/users":    handlers.UsersAdminRouter(usersAdmin, resolved.ReadOnly),
 			"/polling": handlers.PollingAdminRouter(pollingAdmin, handlers.PollingAdminConfig{
-				Paused: resolvedPolling.Paused, Authority: resolvedPolling.Authority, ExcludedNodes: resolvedPolling.ExcludedNodes}),
+				Paused: resolvedPolling.Paused, Authority: resolvedPolling.Authority,
+				EvidenceWindow: resolvedPolling.EvidenceWindow, ExcludedNodes: resolvedPolling.ExcludedNodes}),
 		},
 		GuestPolling:    guestPolling,
 		PollingEnabled:  resolvedPolling.Enabled,

@@ -46,7 +46,7 @@ func TestUserAtlasPostgres(t *testing.T) {
 	pins := []api.StoredPin{
 		{Kind: "observer", Key: atlasKey(2), Name: "north", Tiles: tiles},
 		{Kind: "node", Key: atlasKey(1), Name: "hill", Tiles: tiles, View: "telemetry", TelemetryTiles: []string{"battery", "noise", "uptime", "packets"}},
-		{Kind: "node", Key: atlasKey(3), Name: "unknown"},
+		{Kind: "node", Key: atlasKey(3), Name: "unknown", View: "poller"},
 	}
 	doc, ok, err := s.ReplaceUserAtlas(ctx, u.ID, 0, "3d", pins)
 	if err != nil || !ok || doc.Revision != 1 || doc.Range != "3d" || len(doc.Pins) != 3 {
@@ -62,7 +62,7 @@ func TestUserAtlasPostgres(t *testing.T) {
 	if p := a.Pins[1]; p.ID == nil || *p.ID != nodeID.String() || p.ObserverID == nil || *p.ObserverID != obsID.String() || p.View != "telemetry" || strings.Join(p.TelemetryTiles, ",") != "battery,noise,uptime,packets" || strings.Join(p.Tiles, ",") != strings.Join(tiles, ",") {
 		t.Errorf("node that is also an observer: %+v", p)
 	}
-	if p := a.Pins[2]; p.ID != nil || p.ObserverID != nil || p.Tiles != nil || p.TelemetryTiles != nil {
+	if p := a.Pins[2]; p.ID != nil || p.ObserverID != nil || p.Tiles != nil || p.TelemetryTiles != nil || p.View != "poller" {
 		t.Errorf("unknown node: %+v", p)
 	}
 
@@ -217,6 +217,11 @@ func TestUserAtlasLegacyPinPostgres(t *testing.T) {
 	a, err := s.UserAtlas(ctx, u.ID)
 	if err != nil || len(a.Pins) != 1 || a.Pins[0].View != "observer" || a.Pins[0].TelemetryTiles != nil || len(a.Pins[0].Tiles) != 4 {
 		t.Fatalf("legacy pin: %+v %v", a, err)
+	}
+	for _, v := range []string{"heard", "telemetry", "poller"} {
+		if _, err := pool.Exec(ctx, `UPDATE user_atlas_pins SET view = $2 WHERE user_id = $1`, u.ID, v); err != nil {
+			t.Errorf("view %s: %v", v, err)
+		}
 	}
 	if _, err := pool.Exec(ctx, `UPDATE user_atlas_pins SET view = 'bogus' WHERE user_id = $1`, u.ID); err == nil {
 		t.Error("an unknown view is still refused")

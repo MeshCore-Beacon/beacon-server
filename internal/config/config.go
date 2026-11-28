@@ -389,7 +389,8 @@ type TelemetryConfig struct {
 
 	// Resolution is how frequently a telemetry snapshot is stored per observer.
 	// Status messages arriving within the same resolution window are deduplicated.
-	// Defaults to 1h if not set.
+	// Observer alerts and charts read these snapshots, so a longer window delays
+	// alerts and a shorter one stores more rows. Defaults to 15m if not set.
 	Resolution duration `yaml:"resolution"`
 }
 
@@ -860,7 +861,7 @@ func Resolve(cfg *Config) ResolvedConfig {
 		r.RateLimit.Burst = r.RateLimit.RequestsPerMinute
 	}
 	if r.TelemetryResolution == 0 {
-		r.TelemetryResolution = time.Hour
+		r.TelemetryResolution = 15 * time.Minute
 	}
 	if r.TelemetryRetention == 0 {
 		r.TelemetryRetention = 31 * 24 * time.Hour

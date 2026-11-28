@@ -115,6 +115,8 @@ statements:
   GetObserverComparison: {sqlc: GetObserverComparison, plan: custom}
   GetNodeActivityHourly: {sqlc: GetNodeActivityHourly, plan: custom}
   ListTraceTags: {sqlc: ListTraceTags, group: stats_adverts, plan: custom}
+  # A node's own polling claim and the targets it names.
+  NodePoller: {sqlc: NodePoller, plan: custom}
   # One observer's adverts and telemetry pages.
   ListObserverAdverts: {sqlc: ListObserverAdverts, group: stats_adverts, plan: cached, admission: observer_page}
   GetObserverTelemetrySince: {sqlc: GetObserverTelemetrySince, group: stats_adverts, plan: cached, admission: observer_page}
@@ -419,6 +421,11 @@ resolvers:
   seah6_ts: "SELECT date_trunc('milliseconds', last_seen, 'UTC') FROM known_routes WHERE iata = 'SEA' AND hop_count = 6 ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 199 LIMIT 1"
   small_bogus5000: "SELECT array_agg(c ORDER BY c) FROM (SELECT c FROM (SELECT chr(65 + a) || chr(65 + b) || chr(65 + d) c FROM generate_series(0, 25) a, generate_series(0, 25) b, generate_series(0, 25) d) g WHERE c NOT IN (SELECT DISTINCT iata FROM node_iatas) AND c NOT IN (SELECT iata FROM iata_codes) ORDER BY c LIMIT 5000) s"
   small_list50: "SELECT array_agg(iata ORDER BY n DESC, iata) FROM (SELECT iata, count(*) n FROM node_iatas GROUP BY iata ORDER BY 2 DESC, 1 LIMIT 50) s"
+  # The poller read: the claimant naming the most targets with the most readings, one naming targets with no
+  # readings, and the day the read counts readings over.
+  poller_busy_key: "SELECT c.observer_public_key FROM polling_candidates c GROUP BY c.observer_public_key ORDER BY count(*) DESC, (SELECT count(*) FROM repeater_readings r WHERE r.observer_public_key = c.observer_public_key) DESC, c.observer_public_key LIMIT 1"
+  poller_no_readings_key: "SELECT c.observer_public_key FROM polling_candidates c WHERE NOT EXISTS (SELECT 1 FROM repeater_readings r WHERE r.observer_public_key = c.observer_public_key) GROUP BY c.observer_public_key ORDER BY count(*) DESC, c.observer_public_key LIMIT 1"
+  poller_readings_after: "SELECT max(received_at) - interval '24 hours' FROM repeater_readings"
   small_top_sea_node: "SELECT ni.node_id FROM node_iatas ni WHERE ni.iata = 'SEA' ORDER BY (SELECT count(*) FROM node_iatas x WHERE x.node_id = ni.node_id) DESC, ni.node_id LIMIT 1"
   # Lookup-table roles: the node with the most neighbor rows, the 60 IATAs with the most channel members, the scope
   # with the fewest rollup rows, and a first-heard window over the newest day of trace tags. Each reads one small table.
@@ -3191,6 +3198,30 @@ entries:
     params: [{raw: "false"}, {raw: "false"}, {raw: "'name'"}, {raw: "2"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "''"}, {raw: "''"}, {raw: "'true'"}, {raw: "false"}, {raw: "0"}, {raw: "''"}, {raw: "0"}, {raw: "0"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "200"}]
     tiers: [fixture, prod]
     note: "fixture and prod only, as sm.nodes_sorted.name"
+  - id: sm.node_poller.busy
+    stmt: NodePoller
+    shape: "NodePoller, a claim naming 8 targets, readings for each"
+    params: [{r: poller_readings_after}, {r: poller_busy_key}]
+    tiers: [fixture, prod]
+    expect:
+      forbid: [{node: Seq Scan, relations: [repeater_readings], reason: "readings are counted and looked up through the observer and target indexes"}]
+    note: "fixture and prod only: the local copy's overlay has no polling_claims, so no budget is measured"
+  - id: sm.node_poller.no_readings
+    stmt: NodePoller
+    shape: "NodePoller, a claim naming 8 targets, no readings"
+    params: [{r: poller_readings_after}, {r: poller_no_readings_key}]
+    tiers: [fixture, prod]
+    expect:
+      forbid: [{node: Seq Scan, relations: [repeater_readings], reason: "readings are counted and looked up through the observer and target indexes"}]
+    note: "fixture and prod only, as sm.node_poller.busy"
+  - id: sm.node_poller.absent
+    stmt: NodePoller
+    shape: "NodePoller, a key with no claim"
+    params: [{r: poller_readings_after}, {raw: "'\\x0000000000000000000000000000000000000000000000000000000000000000'::bytea"}]
+    tiers: [fixture, prod]
+    expect:
+      forbid: [{node: Seq Scan, relations: [repeater_readings], reason: "readings are counted and looked up through the observer and target indexes"}]
+    note: "fixture and prod only, as sm.node_poller.busy"
   - id: sm.nodes_sorted.name
     stmt: ListNodesSorted
     shape: "ListNodesSorted name"

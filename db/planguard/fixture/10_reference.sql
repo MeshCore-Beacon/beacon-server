@@ -98,6 +98,28 @@ INSERT INTO polling_claims (observer_public_key, observer_id, claimed_at, receiv
 SELECT decode(md5('observer-key' || o.rank) || md5('observer-key2' || o.rank), 'hex'), md5('observer' || o.rank)::uuid,
        timestamptz '2026-10-18 16:00+00', timestamptz '2026-10-18 16:00+00'
 FROM planguard_src.po_observer o WHERE o.rank <= 48;
+-- What the poller read works from. Observers 1-24 each name the firmware's limit of 8 repeaters, overlapping the
+-- next observer's by four; the lowest observer naming a repeater is its poller, the other its standby. Observers
+-- 1-12 delivered a reading an hour for two days; 13-24 delivered none; 25-48 claim nothing.
+CREATE TABLE planguard_src.poll_target AS
+SELECT n.public_key, row_number() OVER (ORDER BY n.id)::int AS rn FROM nodes n WHERE n.node_type = 2;
+CREATE TABLE planguard_src.poll_candidate AS
+SELECT decode(md5('observer-key' || o.rank) || md5('observer-key2' || o.rank), 'hex') AS observer_public_key,
+       md5('observer' || o.rank)::uuid AS observer_id, o.rank AS observer_rank, t.public_key AS target_public_key,
+       (row_number() OVER (PARTITION BY t.public_key ORDER BY o.rank) - 1)::int AS rank
+FROM planguard_src.po_observer o
+JOIN planguard_src.poll_target t ON t.rn BETWEEN (o.rank - 1) * 4 + 1 AND (o.rank - 1) * 4 + 8
+WHERE o.rank <= 24;
+INSERT INTO polling_candidates (observer_public_key, target_public_key, key_mode, state, last_attempt, last_ok)
+SELECT observer_public_key, target_public_key, 'own', 'ok', timestamptz '2026-10-18 15:00+00', timestamptz '2026-10-18 15:00+00'
+FROM planguard_src.poll_candidate;
+INSERT INTO polling_assignments (target_public_key, observer_public_key, rank, evidence_snr, evidence_count, assigned_at)
+SELECT target_public_key, observer_public_key, rank, 6.5, 12, timestamptz '2026-10-18 12:00+00' FROM planguard_src.poll_candidate;
+INSERT INTO repeater_readings (target_public_key, observer_public_key, observer_id, sampled_at, received_at, method, tag, battery_mv, trusted)
+SELECT c.target_public_key, c.observer_public_key, c.observer_id, timestamptz '2026-10-18 16:00+00' - h * interval '1 hour',
+       timestamptz '2026-10-18 16:00+00' - h * interval '1 hour', 'status', h, 4000 - h, true
+FROM planguard_src.poll_candidate c CROSS JOIN generate_series(0, 47) h
+WHERE c.observer_rank <= 12;
 
 -- node_iatas: 1/20 of the copy's nodes per region, at least 8 nodes in every region that has routes; a node is
 -- heard in about five regions. The planted prefix relays are heard at their home region.

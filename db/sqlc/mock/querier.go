@@ -4566,6 +4566,21 @@ func (mr *MockQuerierMockRecorder) NodeLatestTrustedReadingAt(ctx, targetPublicK
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodeLatestTrustedReadingAt", reflect.TypeOf((*MockQuerier)(nil).NodeLatestTrustedReadingAt), ctx, targetPublicKey)
 }
 
+// NodePoller mocks base method.
+func (m *MockQuerier) NodePoller(ctx context.Context, arg db.NodePollerParams) ([]db.NodePollerRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NodePoller", ctx, arg)
+	ret0, _ := ret[0].([]db.NodePollerRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// NodePoller indicates an expected call of NodePoller.
+func (mr *MockQuerierMockRecorder) NodePoller(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodePoller", reflect.TypeOf((*MockQuerier)(nil).NodePoller), ctx, arg)
+}
+
 // NodePollingAssignments mocks base method.
 func (m *MockQuerier) NodePollingAssignments(ctx context.Context, targetPublicKey []byte) ([]db.NodePollingAssignmentsRow, error) {
 	m.ctrl.T.Helper()

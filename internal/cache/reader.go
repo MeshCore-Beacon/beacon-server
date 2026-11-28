@@ -291,6 +291,11 @@ func (cr *CachedReader) GetNodePolling(ctx context.Context, nodeID uuid.UUID) (*
 	return cr.inner.GetNodePolling(ctx, nodeID)
 }
 
+// GetNodePoller implements [api.Reader].
+func (cr *CachedReader) GetNodePoller(ctx context.Context, nodeID uuid.UUID) (*api.NodePoller, error) {
+	return cr.inner.GetNodePoller(ctx, nodeID)
+}
+
 // GetObserverTelemetryBucketed implements [api.Reader].
 func (cr *CachedReader) GetObserverTelemetryBucketed(ctx context.Context, observerID uuid.UUID, since, until time.Time, bucketHours int32) ([]api.ObserverTelemetryPoint, error) {
 	return cr.inner.GetObserverTelemetryBucketed(ctx, observerID, since, until, bucketHours)
