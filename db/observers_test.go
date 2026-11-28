@@ -613,6 +613,30 @@ func TestGetObserverRadio_WithFields(t *testing.T) {
 	}
 }
 
+func TestAdvertRoles(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  sqlc.GetAdvertRolesRow
+		err  error
+	}{
+		{"observer", sqlc.GetAdvertRolesRow{IsObserver: true}, nil},
+		{"poller", sqlc.GetAdvertRolesRow{IsPoller: true}, nil},
+		{"both", sqlc.GetAdvertRolesRow{IsObserver: true, IsPoller: true}, nil},
+		{"neither", sqlc.GetAdvertRolesRow{}, nil},
+		{"read error", sqlc.GetAdvertRolesRow{IsObserver: true}, errors.New("unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := mockdb.NewMockQuerier(gomock.NewController(t))
+			key := []byte{1, 2}
+			mock.EXPECT().GetAdvertRoles(gomock.Any(), key).Return(tc.row, tc.err)
+			observer, poller := (&Store{q: mock}).AdvertRoles(context.Background(), key)
+			if observer != (tc.err == nil && tc.row.IsObserver) || poller != (tc.err == nil && tc.row.IsPoller) {
+				t.Fatalf("got observer=%t poller=%t", observer, poller)
+			}
+		})
+	}
+}
+
 func TestIsObserverByPubkey_Found(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)

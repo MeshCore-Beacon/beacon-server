@@ -215,6 +215,7 @@ type Querier interface {
 	// Marks the hour complete and bumps the revision only when its content changed.
 	FinishRollupHour(ctx context.Context, arg FinishRollupHourParams) (bool, error)
 	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
+	GetAdvertRoles(ctx context.Context, publicKey []byte) (GetAdvertRolesRow, error)
 	// Both counters only grow, so their sum changes whenever rolled content or coverage does.
 	GetAnalyticsRevision(ctx context.Context) (int64, error)
 	GetBackgroundState(ctx context.Context, key string) (json.RawMessage, error)

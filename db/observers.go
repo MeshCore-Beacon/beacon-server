@@ -617,6 +617,15 @@ func (s *Store) IsObserverByPubkey(ctx context.Context, pubkey []byte) bool {
 	return err == nil
 }
 
+// AdvertRoles reads both flags for a live node update in one database round trip.
+func (s *Store) AdvertRoles(ctx context.Context, pubkey []byte) (isObserver, isPoller bool) {
+	roles, err := s.q.GetAdvertRoles(ctx, pubkey)
+	if err != nil {
+		return false, false
+	}
+	return roles.IsObserver, roles.IsPoller
+}
+
 func (s *Store) DeleteOldTelemetry(ctx context.Context, cutoff time.Time) error {
 	return s.q.DeleteOldTelemetry(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
 }

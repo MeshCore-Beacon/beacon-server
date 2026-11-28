@@ -148,7 +148,9 @@ type stubDB struct {
 	upsertChannelIATACalls     int
 	traceHearings              []TraceHearing
 	packetIsNew                bool
-	isPoller                   bool // returned by IsPollerByPubkey
+	isObserver                 bool
+	isPoller                   bool
+	advertRoleReads            int
 	observationInserted        bool
 	channelMessages            []InsertChannelMessageParams
 	observationCount           int64
@@ -255,8 +257,10 @@ func (s *stubDB) InsertObserverTelemetry(_ context.Context, _ uuid.UUID, reporte
 func (s *stubDB) GetObserverRadio(_ context.Context, _ uuid.UUID) (RadioSettings, error) {
 	return RadioSettings{}, nil
 }
-func (s *stubDB) IsObserverByPubkey(_ context.Context, _ []byte) bool { return false }
-func (s *stubDB) IsPollerByPubkey(_ context.Context, _ []byte) bool   { return s.isPoller }
+func (s *stubDB) AdvertRoles(_ context.Context, _ []byte) (bool, bool) {
+	s.advertRoleReads++
+	return s.isObserver, s.isPoller
+}
 func (s *stubDB) GetObserverScopes(_ context.Context, _ uuid.UUID) ([]string, error) {
 	return nil, nil
 }
